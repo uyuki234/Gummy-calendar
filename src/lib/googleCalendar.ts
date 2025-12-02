@@ -1,0 +1,165 @@
+// Google Calendar API (gapi + Google Identity Services)
+// env: VITE_GOOGLE_CLIENT_ID, VITE_GOOGLE_API_KEY
+
+const DISCOVERY_DOC =
+  "https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest";
+const SCOPES = "https://www.googleapis.com/auth/calendar.readonly";
+
+declare global {
+  interface Window {
+    gapiLoaded?: () => void;
+    gisLoaded?: () => void;
+  }
+}
+
+let gapiInited = false;
+let gisInited = false;
+let tokenClient: any;
+
+export function initGoogle(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const apiKey = import.meta.env.VITE_GOOGLE_API_KEY as string;
+    const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID as string;
+    if (!apiKey || !clientId) {
+      reject(new Error("Missing GOOGLE CLIENT ID or API KEY env vars"));
+      return;
+    }
+
+    window.gapiLoaded = () => {
+      // Load gapi client
+      // @ts-ignore
+      gapi.load("client", async () => {
+        try {
+          // @ts-ignore
+          await gapi.client.init({ apiKey, discoveryDocs: [DISCOVERY_DOC] });
+          gapiInited = true;
+          maybeResolve();
+        } catch (e) {
+          reject(e);
+        }
+      });
+    };
+
+    window.gisLoaded = () => {
+      try {
+        // @ts-ignore
+        tokenClient = google.accounts.oauth2.initTokenClient({
+          client_id: clientId,
+          scope: SCOPES,
+          // default callback will be replaced in ensureAuthorized
+          callback: (_resp: any) => {},
+        });
+        gisInited = true;
+        maybeResolve();
+      } catch (e) {
+        reject(e);
+      }
+    };
+
+    function maybeResolve() {
+      if (gapiInited && gisInited) resolve();
+    }
+  });
+}
+
+export async function ensureAuthorized(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    try {
+      // @ts-ignore
+      tokenClient.callback = async (resp: any) => {
+        if (resp.error !== undefined) {
+          reject(resp);
+          return;
+        }
+        // Ensure the gapi client has the access token so gapi.client requests work
+        try {
+          // @ts-ignore
+          if (resp.access_token) {
+            // @ts-ignore
+            gapi.client.setToken({ access_token: resp.access_token });
+          }
+        } catch (e) {
+          // ignore setToken errors here; we'll still check the token below
+        }
+
+        // @ts-ignore
+        const token = gapi.client.getToken();
+        if (!token || !token.access_token) {
+          reject(new Error("No token"));
+          return;
+        }
+        resolve();
+      };
+      // @ts-ignore
+      const token =
+        typeof gapi !== "undefined" && gapi.client
+          ? gapi.client.getToken()
+          : null;
+      if (!token || !token.access_token) {
+        tokenClient.requestAccessToken({ prompt: "consent" });
+      } else {
+        tokenClient.requestAccessToken({ prompt: "" });
+      }
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
+export type EventListParams = {
+  year: number;
+};
+
+export async function fetchYearEvents({ year }: EventListParams) {
+  // Construct RFC3339 timeMin/timeMax in UTC for the whole year
+  const timeMin = new Date(Date.UTC(year, 0, 1, 0, 0, 0)).toISOString();
+  const timeMax = new Date(Date.UTC(year, 11, 31, 23, 59, 59)).toISOString();
+
+  let items: any[] = [];
+  let pageToken: string | undefined = undefined;
+  // @ts-ignore
+  do {
+    // @ts-ignore
+    const response = await gapi.client.calendar.events.list({
+      calendarId: "primary",
+      timeMin,
+      timeMax,
+      singleEvents: true,
+      orderBy: "startTime",
+      showDeleted: false,
+      maxResults: 2500,
+      pageToken,
+    });
+    const res = response.result;
+    items = items.concat(res.items || []);
+    pageToken = res.nextPageToken;
+  } while (pageToken);
+
+  return items.map((ev) => ({
+    id: ev.id as string,
+    title: (ev.summary || "") as string,
+    start: new Date(ev.start?.dateTime || ev.start?.date),
+    end: ev.end ? new Date(ev.end?.dateTime || ev.end?.date) : undefined,
+    description: ev.description || undefined,
+  }));
+}
+
+export function signOut() {
+  // @ts-ignore
+  const token = gapi.client.getToken();
+  if (token) {
+    try {
+      // @ts-ignore
+      google.accounts.oauth2.revoke(token.access_token, () => {});
+    } catch (e) {
+      // ignore revoke errors
+    }
+    try {
+      // clear gapi client token
+      // @ts-ignore
+      gapi.client.setToken({});
+    } catch (e) {
+      // ignore
+    }
+  }
+}
