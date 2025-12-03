@@ -28,6 +28,7 @@ type Gummy = {
   color: string;
   weight: number;
   hsl?: { h: number; s: number; l: number };
+  isBirthday?: boolean;
 };
 
 function toGummies(events: CalendarEvent[]): Gummy[] {
@@ -59,10 +60,15 @@ function toGummies(events: CalendarEvent[]): Gummy[] {
             ? 'life'
             : 'other';
     const baseWeight = isAllDay ? 0.9 : 1.0;
-    const weight = Math.min(
+    let weight = Math.min(
       4,
       baseWeight + Math.log2(attendees + 1) + Math.min(1.5, durationHours / 6)
     );
+    // 誕生日判定（タイトル/説明/場所に "誕生日" または "birthday"）
+    const isBirthday = /誕生日|birthday/i.test(text);
+    if (isBirthday) {
+      weight = Math.min(4, weight * 1.5);
+    }
     return {
       id: ev.id,
       date: '',
@@ -71,6 +77,7 @@ function toGummies(events: CalendarEvent[]): Gummy[] {
       color: col.hex,
       weight,
       hsl: { h: col.h, s: col.s, l: col.l },
+      isBirthday,
     };
   });
 }
@@ -86,10 +93,12 @@ export default function App() {
   const {
     canvasRef,
     addGummies,
+    clearGummies,
     canvasSize,
   }: {
     canvasRef: React.RefObject<HTMLCanvasElement>;
-    addGummies: (gummies: { color: string; weight: number }[]) => void;
+    addGummies: (gummies: { color: string; weight: number; isBirthday?: boolean }[]) => void;
+    clearGummies: () => void;
     canvasSize: { width: number; height: number };
   } = useGummyWorld({
     centerBias: 0.12,
@@ -108,7 +117,7 @@ export default function App() {
     try {
       await getAccessToken();
       const events = await fetchEvents(year);
-      setStatus(`取得完了:${events.length}件 (まもなく年間グミシャワー開始…)`);
+      setStatus(`取得完了:${events.length}件 (グミを生成中…)`);
       toast.success(`${events.length}件のイベントを取得しました`);
 
       // 1秒待ってから年間グミシャワー（3秒/12回）を自動開始
@@ -152,12 +161,14 @@ export default function App() {
 
   return (
     <div className="container mx-auto p-6 space-y-4">
-      <h1 className="text-3xl font-bold">カレンダーのデータを取得する</h1>
+      <div className="flex items-baseline gap-3">
+        <h1 className="text-3xl font-bold">カレンダーの予定をグミにする</h1>
+        <span className="text-sm text-muted-foreground">〜一年を振り返ろう〜</span>
+      </div>
 
       <Card className="p-4">
         <div className="flex gap-4 items-center flex-wrap">
           <div className="flex items-center gap-2">
-            <label>年：</label>
             <Select value={String(year)} onValueChange={(v) => setYear(Number(v))}>
               <SelectTrigger className="w-32">
                 <SelectValue />
@@ -169,13 +180,17 @@ export default function App() {
                 <SelectItem value="2026">2026</SelectItem>
               </SelectContent>
             </Select>
+            <label>年のカレンダーを</label>
           </div>
           <Button
             onClick={() => {
               void handleFetch();
             }}
           >
-            取得する
+            グミにする
+          </Button>
+          <Button variant="outline" onClick={clearGummies}>
+            グミを削除
           </Button>
           <span className="text-sm text-muted-foreground">{status}</span>
         </div>

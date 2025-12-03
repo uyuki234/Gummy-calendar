@@ -8,7 +8,8 @@ type GummyData = {
 
 interface UseGummyWorldReturn {
   canvasRef: React.RefObject<HTMLCanvasElement>;
-  addGummies: (gummies: GummyData[]) => void;
+  addGummies: (gummies: (GummyData & { isBirthday?: boolean })[]) => void;
+  clearGummies: () => void;
   canvasSize: { width: number; height: number };
 }
 
@@ -61,15 +62,22 @@ export function useGummyWorld(config?: {
     };
   }, [config, canvasSize]);
 
-  const addGummies = (gummies: GummyData[]) => {
+  const addGummies = (gummies: (GummyData & { isBirthday?: boolean })[]) => {
     if (worldRef.current) {
       worldRef.current.addGummies(gummies);
+    }
+  };
+
+  const clearGummies = () => {
+    if (worldRef.current) {
+      worldRef.current.clear();
     }
   };
 
   return {
     canvasRef,
     addGummies,
+    clearGummies,
     canvasSize,
   };
 }
