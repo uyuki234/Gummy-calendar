@@ -77,7 +77,7 @@ export function wireControls() {
   // const $drop = document.getElementById("drop-btn")!;
   const $month = document.getElementById("month-select") as HTMLSelectElement;
   // const $dropMonth = document.getElementById("drop-month-btn")!;
-  const $shower = document.getElementById("shower-btn")!;
+  // const $shower = document.getElementById("shower-btn")!;
   const world = new GummyWorld(
     document.getElementById("gummy-canvas") as HTMLCanvasElement,
     {
@@ -97,8 +97,15 @@ export function wireControls() {
       state.allEvents = await listEventsForYear(year);
       state.filteredEvents = state.allEvents; // 初期は全件
       renderMonthly($list, state.filteredEvents);
-      $status.textContent = `取得完了：${state.filteredEvents.length}件`;
+      $status.textContent = `取得完了:${state.filteredEvents.length}件 (まもなく年間グミシャワー開始…)`;
       (window as any).currentEvents = state.filteredEvents; // 互換
+
+      // 1秒待ってから年間グミシャワー（3秒/12回）を自動開始
+      setTimeout(() => {
+        if (state.filteredEvents.length > 0) {
+          startYearShower();
+        }
+      }, 1000);
     } catch (e: any) {
       console.error(e);
       $status.textContent = `失敗：${e.message}`;
@@ -156,9 +163,9 @@ export function wireControls() {
   //   world.addGummies(gummies);
   // });
 
-  // 年間シャワー（3秒/12回）
+  // 年間シャワー（3秒/12回）を関数化
   let timer: number | null = null;
-  $shower.addEventListener("click", () => {
+  function startYearShower() {
     if (timer) {
       clearInterval(timer);
       timer = null;
@@ -172,6 +179,8 @@ export function wireControls() {
       if (i >= months.length) {
         clearInterval(timer!);
         timer = null;
+        // シャワー終了時にステータスメッセージをクリア
+        $status.textContent = "";
         return;
       }
       const key = `${state.year}-${months[i++]}`;
@@ -184,5 +193,10 @@ export function wireControls() {
         world.addGummies(gummies);
       }
     }, interval);
-  });
+  }
+
+  // // ボタンから年間シャワー起動
+  // $shower.addEventListener("click", () => {
+  //   startYearShower();
+  // });
 }
