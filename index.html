@@ -15,23 +15,76 @@
         padding: 0.8rem 1.2rem;
         font-size: 1rem;
       }
-      pre {
+      #output {
         background: #f4f4f8;
         padding: 1rem;
         overflow: auto;
+        max-height: 600px;
+        border-radius: 4px;
+      }
+      .month-section {
+        margin-bottom: 1.5rem;
+      }
+      details {
+        background: white;
+        border-radius: 4px;
+        padding: 0.5rem;
+        margin-bottom: 0.5rem;
+      }
+      summary {
+        cursor: pointer;
+        font-weight: bold;
+        color: #2563eb;
+        padding: 0.5rem;
+        user-select: none;
+      }
+      summary:hover {
+        background: #f0f9ff;
+        border-radius: 4px;
+      }
+      .event-list {
+        list-style: none;
+        padding: 0;
+        margin: 0.5rem 0 0 0;
+      }
+      .event-item {
+        padding: 0.5rem;
+        border-bottom: 1px solid #e0e0e0;
+        font-family: monospace;
+      }
+      .event-item:last-child {
+        border-bottom: none;
+      }
+      .event-date {
+        color: #2563eb;
+        font-weight: bold;
+        margin-right: 1rem;
+      }
+      .event-title {
+        color: #1f2937;
       }
     </style>
   </head>
   <body>
     <h1>カレンダーのデータを取得する</h1>
     <p>
-      ボタンを押すと、今年の Google Calendar
+      年を選択してボタンを押すと、その年の Google Calendar
       イベントを取得します（読み取り専用）。
     </p>
 
+    <div style="margin-bottom: 1rem">
+      <label for="year-select">年を選択: </label>
+      <select id="year-select" style="padding: 0.5rem; font-size: 1rem">
+        <option value="2023">2023</option>
+        <option value="2024">2024</option>
+        <option value="2025" selected>2025</option>
+        <option value="2026">2026</option>
+      </select>
+    </div>
+
     <button id="fetch-btn">カレンダーのデータを取得する</button>
     <p id="status"></p>
-    <pre id="output"></pre>
+    <div id="output"></div>
 
     <script type="module">
       // ★★ ここを書き換える ★★
@@ -51,6 +104,7 @@
       const $status = document.getElementById("status");
       const $output = document.getElementById("output");
       const $btn = document.getElementById("fetch-btn");
+      const $yearSelect = document.getElementById("year-select");
 
       let tokenClient = null;
       let accessToken = null;
@@ -59,8 +113,59 @@
       function setStatus(msg) {
         $status.textContent = msg;
       }
-      function print(obj) {
-        $output.textContent = JSON.stringify(obj, null, 2);
+
+      function groupByMonth(events) {
+        const map = new Map(); // key: 'YYYY-MM', value: array of events
+        for (const ev of events) {
+          const startRaw = ev.start?.dateTime || ev.start?.date;
+          if (!startRaw) continue;
+          const isoDate = startRaw.split("T")[0]; // YYYY-MM-DD
+          const ym = isoDate.slice(0, 7); // YYYY-MM
+          if (!map.has(ym)) map.set(ym, []);
+          map.get(ym).push(ev);
+        }
+        return map;
+      }
+
+      function displayEvents(events) {
+        if (events.length === 0) {
+          $output.innerHTML =
+            '<p style="color: #6b7280;">イベントがありません</p>';
+          return;
+        }
+
+        const monthly = groupByMonth(events);
+        const months = Array.from(monthly.keys()).sort();
+
+        const html = months
+          .map((ym) => {
+            const monthEvents = monthly.get(ym);
+            const count = monthEvents.length;
+
+            const eventItems = monthEvents
+              .map((ev) => {
+                const startRaw = ev.start?.dateTime || ev.start?.date || "";
+                const dateStr = startRaw.split("T")[0] || "日付不明";
+                const title = ev.summary || "(タイトルなし)";
+
+                return `<li class="event-item">
+                <span class="event-date">${dateStr}</span> | <span class="event-title">${title}</span>
+              </li>`;
+              })
+              .join("");
+
+            return `<section class="month-section">
+            <details open>
+              <summary>${ym} | ${count}件</summary>
+              <ul class="event-list">
+                ${eventItems}
+              </ul>
+            </details>
+          </section>`;
+          })
+          .join("");
+
+        $output.innerHTML = html;
       }
 
       function initTokenClient() {
@@ -148,21 +253,10 @@
         try {
           await ensureAccessToken();
           setStatus("データ取得中…");
-          const year = new Date().getFullYear(); // 今年
+          const year = parseInt($yearSelect.value); // 選択された年を取得
           const events = await fetchEventsForYear(year);
-          setStatus(`取得完了：${events.length}件`);
-          // 必要最小限のフィールドに整形（後でグミ化しやすいように）
-          const minimal = events.map((ev) => ({
-            id: ev.id,
-            summary: ev.summary || "",
-            start: ev.start?.dateTime || ev.start?.date || null,
-            end: ev.end?.dateTime || ev.end?.date || null,
-            // メモ：色や感情ベースの判定材料になりそうな要素
-            description: ev.description || "",
-            location: ev.location || "",
-            attendees: ev.attendees?.length || 0,
-          }));
-          print(minimal);
+          setStatus(`取得完了：${events.length}件（${year}年）`);
+          displayEvents(events);
         } catch (e) {
           console.error(e);
           setStatus("失敗：" + e.message);
