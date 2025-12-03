@@ -1,9 +1,14 @@
+/// <reference types="vite/client" />
 // Google Calendar API (gapi + Google Identity Services)
 // env: VITE_GOOGLE_CLIENT_ID, VITE_GOOGLE_API_KEY
 
 const DISCOVERY_DOC =
   "https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest";
 const SCOPES = "https://www.googleapis.com/auth/calendar.readonly";
+
+// Allow global symbols from loaded Google scripts
+declare const gapi: any;
+declare const google: any;
 
 declare global {
   interface Window {
@@ -66,6 +71,40 @@ export function initGoogle(): Promise<void> {
     function maybeResolve() {
       if (gapiInited && gisInited) resolve();
     }
+
+    // Handle scripts that may have already loaded before handlers were set
+    try {
+      // @ts-ignore
+      if (typeof gapi !== "undefined" && gapi?.client) {
+        // If gapi is present, initialize immediately
+        // @ts-ignore
+        gapi.load("client", async () => {
+          try {
+            // @ts-ignore
+            await gapi.client.init({ apiKey, discoveryDocs: [DISCOVERY_DOC] });
+            gapiInited = true;
+            maybeResolve();
+          } catch (e) {
+            reject(e);
+          }
+        });
+      }
+    } catch {}
+
+    try {
+      // @ts-ignore
+      if (typeof google !== "undefined" && google?.accounts?.oauth2) {
+        // Initialize GIS immediately if available
+        // @ts-ignore
+        tokenClient = google.accounts.oauth2.initTokenClient({
+          client_id: clientId,
+          scope: SCOPES,
+          callback: (_resp: any) => {},
+        });
+        gisInited = true;
+        maybeResolve();
+      }
+    } catch {}
   });
 }
 
@@ -137,7 +176,7 @@ export async function fetchYearEvents({ year }: EventListParams) {
       maxResults: 2500,
       pageToken,
     });
-    const res = response.result;
+    const res: any = response.result;
     items = items.concat(res.items || []);
     pageToken = res.nextPageToken;
   } while (pageToken);
