@@ -83,7 +83,55 @@
     </div>
 
     <button id="fetch-btn">カレンダーのデータを取得する</button>
+    <button
+      id="download-btn"
+      style="
+        display: none;
+        margin-left: 0.5rem;
+        background: #10b981;
+        color: white;
+      "
+    >
+      JSONダウンロード
+    </button>
     <p id="status"></p>
+
+    <div
+      id="filter-section"
+      style="
+        display: none;
+        margin: 1rem 0;
+        padding: 1rem;
+        background: #e0f2fe;
+        border-radius: 4px;
+      "
+    >
+      <h3 style="margin-top: 0">フィルター</h3>
+      <div
+        style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: center"
+      >
+        <input
+          id="q"
+          type="text"
+          placeholder="キーワード（タイトル/説明/場所）"
+          style="padding: 0.5rem; font-size: 1rem; min-width: 250px"
+        />
+        <label style="display: flex; align-items: center; gap: 0.5rem">
+          <input type="checkbox" id="allDayOnly" />
+          <span>終日の予定のみ</span>
+        </label>
+        <button id="apply-filter" style="padding: 0.5rem 1rem">
+          フィルター適用
+        </button>
+        <button
+          id="clear-filter"
+          style="padding: 0.5rem 1rem; background: #e5e7eb"
+        >
+          クリア
+        </button>
+      </div>
+    </div>
+
     <div id="output"></div>
 
     <script type="module">
@@ -104,30 +152,91 @@
       const $status = document.getElementById("status");
       const $output = document.getElementById("output");
       const $btn = document.getElementById("fetch-btn");
+      const $downloadBtn = document.getElementById("download-btn");
       const $yearSelect = document.getElementById("year-select");
+      const $filterSection = document.getElementById("filter-section");
+      const $applyFilter = document.getElementById("apply-filter");
+      const $clearFilter = document.getElementById("clear-filter");
+      const $q = document.getElementById("q");
+      const $allDayOnly = document.getElementById("allDayOnly");
 
       let tokenClient = null;
       let accessToken = null;
       let pendingTokenRequest = null;
+      let allEvents = []; // 取得した全イベントを保持
+      let currentDisplayedEvents = []; // 現在表示中のイベント（フィルター後）
 
       function setStatus(msg) {
         $status.textContent = msg;
       }
 
+      function formatEventDate(ev) {
+        // 終日予定: start.date のみ存在
+        if (ev.start?.date && !ev.start?.dateTime) {
+          return ev.start.date; // YYYY-MM-DD をそのまま返す
+        }
+        // 時間指定予定: start.dateTime 存在
+        if (ev.start?.dateTime) {
+          const d = new Date(ev.start.dateTime);
+          const yyyy = d.getFullYear();
+          const mm = String(d.getMonth() + 1).padStart(2, "0");
+          const dd = String(d.getDate()).padStart(2, "0");
+          return `${yyyy}-${mm}-${dd}`;
+        }
+        return "";
+      }
+
       function groupByMonth(events) {
         const map = new Map(); // key: 'YYYY-MM', value: array of events
         for (const ev of events) {
-          const startRaw = ev.start?.dateTime || ev.start?.date;
-          if (!startRaw) continue;
-          const isoDate = startRaw.split("T")[0]; // YYYY-MM-DD
-          const ym = isoDate.slice(0, 7); // YYYY-MM
+          const dateStr = formatEventDate(ev);
+          if (!dateStr) continue;
+          const ym = dateStr.slice(0, 7); // YYYY-MM
           if (!map.has(ym)) map.set(ym, []);
           map.get(ym).push(ev);
         }
         return map;
       }
 
+      function applyFilter(events) {
+        const q = $q.value.trim().toLowerCase();
+        const allDayOnly = $allDayOnly.checked;
+
+        return events.filter((ev) => {
+          // 終日判定: start.date があって start.dateTime がない
+          const isAllDay = !!ev.start?.date && !ev.start?.dateTime;
+          if (allDayOnly && !isAllDay) return false;
+
+          // キーワード検索
+          if (q) {
+            const text = [
+              ev.summary || "",
+              ev.description || "",
+              ev.location || "",
+            ]
+              .join(" ")
+              .toLowerCase();
+            if (!text.includes(q)) return false;
+          }
+
+          return true;
+        });
+      }
+
+      function downloadJSON(data, filename = "calendar-events.json") {
+        const blob = new Blob([JSON.stringify(data, null, 2)], {
+          type: "application/json",
+        });
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(a.href);
+      }
+
       function displayEvents(events) {
+        currentDisplayedEvents = events; // 現在表示中のイベントを保存
+
         if (events.length === 0) {
           $output.innerHTML =
             '<p style="color: #6b7280;">イベントがありません</p>';
@@ -144,12 +253,14 @@
 
             const eventItems = monthEvents
               .map((ev) => {
-                const startRaw = ev.start?.dateTime || ev.start?.date || "";
-                const dateStr = startRaw.split("T")[0] || "日付不明";
+                const dateStr = formatEventDate(ev) || "日付不明";
                 const title = ev.summary || "(タイトルなし)";
+                // 終日かどうかを表示に反映
+                const isAllDay = !!ev.start?.date && !ev.start?.dateTime;
+                const timeMarker = isAllDay ? " [終日]" : "";
 
                 return `<li class="event-item">
-                <span class="event-date">${dateStr}</span> | <span class="event-title">${title}</span>
+                <span class="event-date">${dateStr}</span> | <span class="event-title">${title}${timeMarker}</span>
               </li>`;
               })
               .join("");
@@ -255,11 +366,48 @@
           setStatus("データ取得中…");
           const year = parseInt($yearSelect.value); // 選択された年を取得
           const events = await fetchEventsForYear(year);
+          allEvents = events; // 全イベントを保存
           setStatus(`取得完了：${events.length}件（${year}年）`);
+
+          // フィルターセクションとダウンロードボタンを表示
+          $filterSection.style.display = "block";
+          $downloadBtn.style.display = "inline-block";
+
           displayEvents(events);
         } catch (e) {
           console.error(e);
           setStatus("失敗：" + e.message);
+        }
+      });
+
+      $downloadBtn.addEventListener("click", () => {
+        const year = parseInt($yearSelect.value);
+        const filename = `calendar-events-${year}.json`;
+        downloadJSON(currentDisplayedEvents, filename);
+        setStatus(
+          `ダウンロード完了：${currentDisplayedEvents.length}件を ${filename} として保存`
+        );
+      });
+
+      $applyFilter.addEventListener("click", () => {
+        const filtered = applyFilter(allEvents);
+        setStatus(
+          `フィルター適用：${filtered.length}件 / ${allEvents.length}件`
+        );
+        displayEvents(filtered);
+      });
+
+      $clearFilter.addEventListener("click", () => {
+        $q.value = "";
+        $allDayOnly.checked = false;
+        setStatus(`取得完了：${allEvents.length}件`);
+        displayEvents(allEvents);
+      });
+
+      // Enterキーでフィルター適用
+      $q.addEventListener("keypress", (e) => {
+        if (e.key === "Enter") {
+          $applyFilter.click();
         }
       });
     </script>
