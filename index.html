@@ -1,25 +1,173 @@
 <!DOCTYPE html>
 <html lang="ja">
   <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>エアライダーのグミシステム</title>
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta charset="utf-8" />
+    <title>カレンダーのデータ取得（グミ用）</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- Google Identity Services: OAuth 2.0 トークン クライアント -->
+    <script async defer src="https://accounts.google.com/gsi/client"></script>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        margin: 2rem;
+      }
+      button {
+        padding: 0.8rem 1.2rem;
+        font-size: 1rem;
+      }
+      pre {
+        background: #f4f4f8;
+        padding: 1rem;
+        overflow: auto;
+      }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
-    <script
-      async
-      defer
-      src="https://apis.google.com/js/api.js"
-      onload="window.gapiLoaded && window.gapiLoaded()"
-    ></script>
-    <script
-      async
-      defer
-      src="https://accounts.google.com/gsi/client"
-      onload="window.gisLoaded && window.gisLoaded()"
-    ></script>
-    <script type="module" src="/src/main.tsx"></script>
+    <h1>カレンダーのデータを取得する</h1>
+    <p>
+      ボタンを押すと、今年の Google Calendar
+      イベントを取得します（読み取り専用）。
+    </p>
+
+    <button id="fetch-btn">カレンダーのデータを取得する</button>
+    <p id="status"></p>
+    <pre id="output"></pre>
+
+    <script type="module">
+      // ★★ ここを書き換える ★★
+      const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID; // Cloud Consoleで発行されたクライアントID
+      const SCOPES = "https://www.googleapis.com/auth/calendar.readonly";
+
+      // 今年の範囲をISO文字列（UTC）で作成
+      function getYearRangeUTC(year = new Date().getFullYear()) {
+        const timeMin = new Date(Date.UTC(year, 0, 1, 0, 0, 0)).toISOString();
+        const timeMax = new Date(
+          Date.UTC(year, 11, 31, 23, 59, 59)
+        ).toISOString();
+        return { timeMin, timeMax, year };
+      }
+
+      // 状態表示用
+      const $status = document.getElementById("status");
+      const $output = document.getElementById("output");
+      const $btn = document.getElementById("fetch-btn");
+
+      let tokenClient = null;
+      let accessToken = null;
+      let pendingTokenRequest = null;
+
+      function setStatus(msg) {
+        $status.textContent = msg;
+      }
+      function print(obj) {
+        $output.textContent = JSON.stringify(obj, null, 2);
+      }
+
+      function initTokenClient() {
+        if (tokenClient) return;
+        tokenClient = google.accounts.oauth2.initTokenClient({
+          client_id: CLIENT_ID,
+          scope: SCOPES,
+          callback: (resp) => {
+            if (resp.error) {
+              setStatus("認証エラー: " + resp.error);
+              console.error(resp);
+              if (pendingTokenRequest) {
+                pendingTokenRequest.reject(new Error(resp.error));
+                pendingTokenRequest = null;
+              }
+            } else {
+              accessToken = resp.access_token;
+              if (pendingTokenRequest) {
+                pendingTokenRequest.resolve(resp.access_token);
+                pendingTokenRequest = null;
+              }
+            }
+          },
+        });
+      }
+
+      async function ensureAccessToken() {
+        if (accessToken) return accessToken;
+
+        // Initialize token client if needed
+        if (!tokenClient) {
+          initTokenClient();
+        }
+
+        // Create promise to wait for callback
+        return new Promise((resolve, reject) => {
+          pendingTokenRequest = { resolve, reject };
+
+          // Check if already has token
+          if (accessToken) {
+            tokenClient.requestAccessToken({ prompt: "" });
+          } else {
+            tokenClient.requestAccessToken({ prompt: "consent" });
+          }
+
+          // Timeout after 60 seconds
+          setTimeout(() => {
+            if (pendingTokenRequest) {
+              pendingTokenRequest.reject(
+                new Error("認証がタイムアウトしました")
+              );
+              pendingTokenRequest = null;
+            }
+          }, 60000);
+        });
+      }
+
+      async function fetchEventsForYear(year) {
+        const { timeMin, timeMax } = getYearRangeUTC(year);
+        const token = await ensureAccessToken();
+
+        const params = new URLSearchParams({
+          timeMin,
+          timeMax,
+          singleEvents: "true",
+          orderBy: "startTime",
+          maxResults: "2500", // 年間最大件数の目安
+        });
+
+        const url = `https://www.googleapis.com/calendar/v3/calendars/primary/events?${params.toString()}`;
+        const res = await fetch(url, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        if (!res.ok) {
+          const errText = await res.text();
+          throw new Error(`Calendar API エラー (${res.status}): ${errText}`);
+        }
+        const data = await res.json();
+        return data.items ?? [];
+      }
+
+      $btn.addEventListener("click", async () => {
+        setStatus("認証しています…");
+        try {
+          await ensureAccessToken();
+          setStatus("データ取得中…");
+          const year = new Date().getFullYear(); // 今年
+          const events = await fetchEventsForYear(year);
+          setStatus(`取得完了：${events.length}件`);
+          // 必要最小限のフィールドに整形（後でグミ化しやすいように）
+          const minimal = events.map((ev) => ({
+            id: ev.id,
+            summary: ev.summary || "",
+            start: ev.start?.dateTime || ev.start?.date || null,
+            end: ev.end?.dateTime || ev.end?.date || null,
+            // メモ：色や感情ベースの判定材料になりそうな要素
+            description: ev.description || "",
+            location: ev.location || "",
+            attendees: ev.attendees?.length || 0,
+          }));
+          print(minimal);
+        } catch (e) {
+          console.error(e);
+          setStatus("失敗：" + e.message);
+        }
+      });
+    </script>
   </body>
 </html>
