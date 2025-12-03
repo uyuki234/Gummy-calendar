@@ -147,17 +147,57 @@
       <p style="margin: 0.5rem 0">
         表示中のイベントをグミに変換して落とします。色は感情、サイズは重み（参加者数など）を表します。
       </p>
-      <button
-        id="drop-btn"
+
+      <!-- 月別ドロップUI -->
+      <div
         style="
-          padding: 0.8rem 1.2rem;
-          background: #f59e0b;
-          color: white;
-          font-weight: bold;
+          margin-top: 1rem;
+          display: flex;
+          gap: 0.5rem;
+          align-items: center;
+          flex-wrap: wrap;
         "
       >
-        グミを落とす
-      </button>
+        <label for="month-select">月：</label>
+        <select id="month-select" style="padding: 0.5rem; font-size: 1rem">
+          <option value="01">01</option>
+          <option value="02">02</option>
+          <option value="03">03</option>
+          <option value="04">04</option>
+          <option value="05">05</option>
+          <option value="06">06</option>
+          <option value="07">07</option>
+          <option value="08">08</option>
+          <option value="09">09</option>
+          <option value="10">10</option>
+          <option value="11">11</option>
+          <option value="12">12</option>
+        </select>
+
+        <button
+          id="drop-month-btn"
+          style="
+            padding: 0.8rem 1.2rem;
+            background: #f59e0b;
+            color: white;
+            font-weight: bold;
+          "
+        >
+          この月のグミを落とす
+        </button>
+        <button
+          id="shower-btn"
+          style="
+            padding: 0.8rem 1.2rem;
+            background: #8b5cf6;
+            color: white;
+            font-weight: bold;
+          "
+        >
+          年間グミシャワー（3秒/12回）
+        </button>
+      </div>
+
       <canvas
         id="gummy-canvas"
         width="900"
@@ -173,6 +213,94 @@
     </div>
 
     <script type="module">
+      // グローバル familyCenterHue 関数（色相ファミリの中心値）
+      function familyCenterHue(fam) {
+        return (
+          {
+            red: 0,
+            orange: 45,
+            yellow: 75,
+            green: 120,
+            cyan: 180,
+            blue: 240,
+            purple: 300,
+          }[fam] ?? 180
+        );
+      }
+      // グローバル hueFamily 関数（色相ファミリ判定）
+      function hueFamily(h) {
+        if (h < 30 || h >= 330) return "red";
+        if (h < 60) return "orange";
+        if (h < 90) return "yellow";
+        if (h < 150) return "green";
+        if (h < 210) return "cyan";
+        if (h < 270) return "blue";
+        return "purple";
+      }
+      // グローバル diversifyColors 関数（同系統色のバラし）
+      function diversifyColors(gummies, opts = {}) {
+        const {
+          threshold = 0.6,
+          jitterDeg = 22,
+          satMin = 0.55,
+          satMax = 0.9,
+          lightMin = 0.45,
+          lightMax = 0.65,
+          useGoldenAngle = true,
+        } = opts;
+
+        const total = gummies.length || 1;
+        const familiesCount = {};
+        for (const g of gummies) {
+          const h = g.hsl?.h ?? hueFromHex(g.color);
+          const fam = hueFamily(h);
+          familiesCount[fam] = (familiesCount[fam] || 0) + 1;
+        }
+        // 支配ファミリ判定
+        let dominant = null,
+          pDominant = 0;
+        for (const [fam, count] of Object.entries(familiesCount)) {
+          const p = count / total;
+          if (p > pDominant) {
+            pDominant = p;
+            dominant = fam;
+          }
+        }
+        if (!dominant || pDominant < threshold) return gummies; // 適用なし
+
+        const spread = 137.5; // 黄金角でバラし
+        let idx = 0;
+
+        return gummies.map((g) => {
+          const h0 = g.hsl?.h ?? hueFromHex(g.color);
+          const fam = hueFamily(h0);
+          if (fam !== dominant) return g; // 支配ファミリ以外は変更しない
+
+          const centerHue = familyCenterHue(fam);
+          const jitter = useGoldenAngle
+            ? ((idx++ * spread) % (jitterDeg * 2)) - jitterDeg
+            : Math.random() * (jitterDeg * 2) - jitterDeg;
+
+          const newH = wrapHue(centerHue + jitter);
+          const newS = clamp(satMin + Math.random() * (satMax - satMin), 0, 1);
+          const newL = clamp(
+            lightMin + Math.random() * (lightMax - lightMin),
+            0,
+            1
+          );
+
+          const newHex = hslToHex(newH, newS, newL);
+          return { ...g, color: newHex, hsl: { h: newH, s: newS, l: newL } };
+        });
+      }
+      // グローバルwrapHue関数（360度環で値を正規化）
+      function wrapHue(h) {
+        return ((h % 360) + 360) % 360;
+      }
+      // グローバルclamp関数（min/max範囲で値を制限）
+      function clamp(x, min, max) {
+        return Math.max(min, Math.min(max, x));
+      }
       // ★★ ここを書き換える ★★
       const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID; // Cloud Consoleで発行されたクライアントID
       const SCOPES = "https://www.googleapis.com/auth/calendar.readonly";
@@ -535,18 +663,27 @@
         if (hueDeg < 0) hueDeg += 360;
 
         // 彩度：強度ベース（弱→0.35, 強→0.9）
-        const s = 0.35 + scores.intensity * 0.55;
+        let s = 0.35 + scores.intensity * 0.55;
+        let l = 0.55;
 
-        // 明度：終日は明るめ、参加者多い＆長時間は暗め
+        // 暖色域（赤〜黄）は最低彩度・明度を引き上げ
+        const isWarm = hueDeg >= 15 && hueDeg <= 75;
+        if (isWarm) {
+          s = Math.max(s, 0.6);
+          l = Math.max(l, 0.5);
+        }
+        // 強度で彩度をもう一段ブースト
+        s = clamp(s + scores.intensity * 0.1, 0, 1);
+
+        // 終日・参加者・時間による明度調整
         const isAllDay = !!ctx.isAllDay;
         const attendees = Math.min(10, ctx.attendees || 0);
         const duration = Math.min(12, ctx.durationHours || 0);
-        let l = isAllDay ? 0.65 : 0.55;
-        l -= attendees * 0.015; // 多人数ほど少し暗く
-        l -= duration * 0.01; // 長時間ほど少し暗く
-        l = Math.max(0.3, Math.min(0.75, l));
+        if (isAllDay) l = clamp(l + 0.05, 0, 1);
+        l = clamp(l - attendees * 0.01 - duration * 0.008, 0.35, 0.75);
 
-        return hslToHex(hueDeg, s, l);
+        const hex = hslToHex(wrapHue(hueDeg), s, l);
+        return { hex, h: wrapHue(hueDeg), s, l };
       }
 
       // HSL → HEX
@@ -602,23 +739,18 @@
           );
           const isAllDay = !!ev.start?.date && !ev.start?.dateTime;
           const attendees = ev.attendees?.length || 0;
-
-          // 所要時間（時間）
           let durationHours = 0;
           if (ev.start?.dateTime && ev.end?.dateTime) {
             const start = new Date(ev.start.dateTime).getTime();
             const end = new Date(ev.end.dateTime).getTime();
             durationHours = Math.max(0, (end - start) / 3600000);
           }
-
           const scores = scoreEmotion(text);
-          const color = colorFromEmotionScores(scores, {
+          const col = colorFromEmotionScores(scores, {
             isAllDay,
             attendees,
             durationHours,
           });
-
-          // 種別（簡易カテゴリ；必要なら辞書拡張）
           const lower = text.toLowerCase();
           const kind = /mtg|会議|meeting/.test(lower)
             ? "meeting"
@@ -629,8 +761,6 @@
             : /休暇|旅行|家族|買い物|生活|life/.test(lower)
             ? "life"
             : "other";
-
-          // 重み：終日・参加者数・所要時間を考慮（粒サイズ・質量）
           const baseWeight = isAllDay ? 0.9 : 1.0;
           const weight = Math.min(
             4,
@@ -638,17 +768,139 @@
               Math.log2(attendees + 1) +
               Math.min(1.5, durationHours / 6)
           );
-
           return {
             id: ev.id,
             date: formatEventDate(ev),
             kind,
             title,
-            emotionScores: scores, // 後でUIに表示できる
-            color,
+            emotionScores: scores,
+            color: col.hex,
+            hsl: { h: col.h, s: col.s, l: col.l },
             weight,
           };
         });
+        // HEX → HSL（Hだけ必要なら簡易でもOK）
+        function hexToRgb(hex) {
+          const m = hex.replace("#", "").match(/.{1,2}/g);
+          if (!m) return [0, 0, 0];
+          return m.map((x) => parseInt(x, 16));
+        }
+        function rgbToHsl(r, g, b) {
+          r /= 255;
+          g /= 255;
+          b /= 255;
+          const max = Math.max(r, g, b),
+            min = Math.min(r, g, b);
+          let h,
+            s,
+            l = (max + min) / 2;
+          const d = max - min;
+          if (d === 0) {
+            h = 0;
+            s = 0;
+          } else {
+            s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+            switch (max) {
+              case r:
+                h = (g - b) / d + (g < b ? 6 : 0);
+                break;
+              case g:
+                h = (b - r) / d + 2;
+                break;
+              case b:
+                h = (r - g) / d + 4;
+                break;
+            }
+            h *= 60;
+          }
+          return { h, s, l };
+        }
+        const hueFromHex = (hex) => rgbToHsl(...hexToRgb(hex)).h;
+
+        // 色相ファミリ判定
+        function hueFamily(h) {
+          if (h < 30 || h >= 330) return "red";
+          if (h < 60) return "orange";
+          if (h < 90) return "yellow";
+          if (h < 150) return "green";
+          if (h < 210) return "cyan";
+          if (h < 270) return "blue";
+          return "purple";
+        }
+        function familyCenterHue(fam) {
+          return (
+            {
+              red: 0,
+              orange: 45,
+              yellow: 75,
+              green: 120,
+              cyan: 180,
+              blue: 240,
+              purple: 300,
+            }[fam] ?? 180
+          );
+        }
+
+        // ★ 同系統 6割以上なら“バラし”を適用
+        function diversifyColors(gummies, opts = {}) {
+          const {
+            threshold = 0.6,
+            jitterDeg = 22,
+            satMin = 0.55,
+            satMax = 0.9,
+            lightMin = 0.45,
+            lightMax = 0.65,
+            useGoldenAngle = true,
+          } = opts;
+
+          const total = gummies.length || 1;
+          const familiesCount = {};
+          for (const g of gummies) {
+            const h = g.hsl?.h ?? hueFromHex(g.color);
+            const fam = hueFamily(h);
+            familiesCount[fam] = (familiesCount[fam] || 0) + 1;
+          }
+          // 支配ファミリ判定
+          let dominant = null,
+            pDominant = 0;
+          for (const [fam, count] of Object.entries(familiesCount)) {
+            const p = count / total;
+            if (p > pDominant) {
+              pDominant = p;
+              dominant = fam;
+            }
+          }
+          if (!dominant || pDominant < threshold) return gummies; // 適用なし
+
+          const spread = 137.5; // 黄金角でバラし
+          let idx = 0;
+
+          return gummies.map((g) => {
+            const h0 = g.hsl?.h ?? hueFromHex(g.color);
+            const fam = hueFamily(h0);
+            if (fam !== dominant) return g; // 支配ファミリ以外は変更しない
+
+            const centerHue = familyCenterHue(fam);
+            const jitter = useGoldenAngle
+              ? ((idx++ * spread) % (jitterDeg * 2)) - jitterDeg
+              : Math.random() * (jitterDeg * 2) - jitterDeg;
+
+            const newH = wrapHue(centerHue + jitter);
+            const newS = clamp(
+              satMin + Math.random() * (satMax - satMin),
+              0,
+              1
+            );
+            const newL = clamp(
+              lightMin + Math.random() * (lightMax - lightMin),
+              0,
+              1
+            );
+
+            const newHex = hslToHex(newH, newS, newL);
+            return { ...g, color: newHex, hsl: { h: newH, s: newS, l: newL } };
+          });
+        }
       }
 
       // 乱数（正規分布）Box-Muller
@@ -659,53 +911,63 @@
         return mean + z * stdDev;
       }
 
-      // ====== 衝突あり落下（中央スポーン＆山） ======
-      function dropGummies(gummies, options = {}) {
-        const canvas = document.getElementById("gummy-canvas");
+      // 月キー取得ユーティリティ
+      function monthKeyFromEvent(ev) {
+        const d = formatEventDate(ev); // YYYY-MM-DD
+        return d ? d.slice(0, 7) : ""; // YYYY-MM
+      }
+
+      // ========== 追加投入型 物理エンジン（GummyWorld） ==========
+      // 円グミの衝突・床・壁あり／後から粒を足せる
+      function startGummyWorld(canvasId, options = {}) {
+        const canvas = document.getElementById(canvasId);
         /** @type {CanvasRenderingContext2D} */
         const ctx = canvas.getContext("2d");
-        const W = canvas.width;
-        const H = canvas.height;
+        const W = canvas.width,
+          H = canvas.height;
 
-        // オプション
         const cfg = {
           gravity: 0.45,
           air: 0.995,
-          restitution: 0.22, // 反発係数
+          restitution: 0.22,
           frictionTangent: 0.02,
-          centerBias: 0.12, // 中央寄せ（正規分布の標準偏差；画面幅に対する割合）
-          maxParticles: 600,
+          centerBias: 0.12, // 中央寄せの強さ（正規分布のσ：画面幅×この比率）
+          maxParticles: 1000,
+          cellSize: 24,
           ...options,
         };
 
-        // 既存アニメがある場合に止める
-        if (window.__gummyRAF) cancelAnimationFrame(window.__gummyRAF);
-
-        // スポーン（中央寄せ）
-        const cx = W / 2;
-        const sigmaX = W * cfg.centerBias;
-        const particles = gummies.slice(0, cfg.maxParticles).map((g) => {
-          const x = Math.max(20, Math.min(W - 20, cx + randNormal(0, sigmaX)));
-          return {
-            x,
-            y: -Math.random() * 200 - 10,
-            vx: (Math.random() - 0.5) * 0.2,
-            vy: 0,
-            r: Math.max(6, 5 + g.weight * 3),
-            m: Math.max(1, g.weight), // 質量
-            color: g.color,
-            kind: g.kind,
-            scores: g.emotionScores,
-          };
-        });
-
-        // 床・壁
+        const particles = [];
         const floorY = H - 10;
         const leftX = 0,
           rightX = W;
+        const cx = W / 2;
 
-        // グリッド（広相）
-        const cellSize = 24;
+        const clamp = (x, min, max) => Math.max(min, Math.min(max, x));
+
+        // グミを粒として追加（後から何度でも呼べる）
+        function addGummies(gummies) {
+          const sigmaX = W * cfg.centerBias;
+          for (const g of gummies) {
+            const x = clamp(cx + randNormal(0, sigmaX), 20, W - 20);
+            particles.push({
+              x,
+              y: -Math.random() * 200 - 20,
+              vx: (Math.random() - 0.5) * 0.25,
+              vy: 0,
+              r: Math.max(6, 5 + g.weight * 3),
+              m: Math.max(1, g.weight),
+              color: g.color,
+              kind: g.kind,
+            });
+          }
+          if (particles.length > cfg.maxParticles) {
+            // 古い粒を捨てる
+            particles.splice(0, particles.length - cfg.maxParticles);
+          }
+        }
+
+        // 空間分割グリッド
         const neighbors = [
           [0, 0],
           [1, 0],
@@ -717,9 +979,9 @@
           [1, -1],
           [-1, 1],
         ];
-
         function buildGrid() {
-          const grid = new Map(); // key "ix,iy" -> indices[]
+          const grid = new Map();
+          const cellSize = cfg.cellSize;
           for (let i = 0; i < particles.length; i++) {
             const p = particles[i];
             const ix = Math.floor(p.x / cellSize);
@@ -741,14 +1003,12 @@
           const dist2 = dx * dx + dy * dy;
           const rSum = p.r + q.r;
           if (dist2 <= 0) return;
-
           if (dist2 < rSum * rSum) {
             const dist = Math.sqrt(dist2) || 0.0001;
             const nx = dx / dist,
-              ny = dy / dist; // 法線
+              ny = dy / dist;
             const overlap = rSum - dist;
 
-            // 位置修正（質量に応じて）
             const totalM = p.m + q.m;
             const pushP = overlap * (q.m / totalM);
             const pushQ = overlap * (p.m / totalM);
@@ -757,7 +1017,6 @@
             q.x += nx * pushQ;
             q.y += ny * pushQ;
 
-            // 速度インパルス（反発）
             const rvx = q.vx - p.vx;
             const rvy = q.vy - p.vy;
             const relN = rvx * nx + rvy * ny;
@@ -771,9 +1030,9 @@
               q.vx += jx / q.m;
               q.vy += jy / q.m;
 
-              // ざっくり摩擦（接線方向を少し減衰）
+              // 接線方向の簡易摩擦
               const tx = -ny,
-                ty = nx; // 接線
+                ty = nx;
               const relT = rvx * tx + rvy * ty;
               const jt = Math.max(
                 -cfg.frictionTangent,
@@ -790,7 +1049,7 @@
         }
 
         function physicsStep(dt = 1) {
-          // 重力・空気抵抗・移動
+          // 重力・減衰・移動
           for (const p of particles) {
             p.vy += cfg.gravity * dt;
             p.vx *= cfg.air;
@@ -809,11 +1068,11 @@
             if (p.y + p.r > floorY) {
               p.y = floorY - p.r;
               p.vy *= -cfg.restitution;
-              if (Math.abs(p.vy) < 0.3) p.vy = 0; // 落ち着かせる
+              if (Math.abs(p.vy) < 0.25) p.vy = 0;
             }
           }
 
-          // 衝突（グリッド近傍）
+          // 衝突（近傍）
           const grid = buildGrid();
           for (const [key, indices] of grid.entries()) {
             const [ix, iy] = key.split(",").map(Number);
@@ -833,18 +1092,18 @@
 
         function draw() {
           ctx.clearRect(0, 0, W, H);
-          // 床表示
+          // 床
           ctx.fillStyle = "#eee";
           ctx.fillRect(0, floorY, W, H - floorY);
 
-          // 粒描画
+          // 粒
           for (const p of particles) {
             ctx.fillStyle = p.color;
             ctx.beginPath();
             ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
             ctx.fill();
 
-            // ぷにっとハイライト
+            // ハイライト
             ctx.fillStyle = "rgba(255,255,255,0.35)";
             ctx.beginPath();
             ctx.arc(
@@ -863,26 +1122,92 @@
           draw();
           window.__gummyRAF = requestAnimationFrame(loop);
         }
+        // 多重ループ防止
+        if (window.__gummyRAF) cancelAnimationFrame(window.__gummyRAF);
         loop();
+
+        return {
+          addGummies,
+          clear: () => {
+            particles.length = 0;
+          },
+        };
       }
 
-      // UIのイベント配線
-      const $dropBtn = document.getElementById("drop-btn");
+      // ========== GummyWorld初期化 ==========
+      window.__world =
+        window.__world ||
+        startGummyWorld("gummy-canvas", {
+          centerBias: 0.12,
+          restitution: 0.22,
+          maxParticles: 1000,
+        });
 
-      $dropBtn.addEventListener("click", () => {
-        const events = currentDisplayedEvents || [];
+      // ========== "月だけ落とす"＆"年間シャワー" ボタン配線 ==========
+      const $monthSelect = document.getElementById("month-select");
+      const $dropMonthBtn = document.getElementById("drop-month-btn");
+      const $showerBtn = document.getElementById("shower-btn");
+
+      // この月だけ落とす
+      $dropMonthBtn.addEventListener("click", () => {
+        const year = parseInt($yearSelect.value, 10);
+        const mm = $monthSelect.value; // '01'..'12'
+        const key = `${year}-${mm}`;
+
+        const events = currentDisplayedEvents.filter(
+          (ev) => monthKeyFromEvent(ev) === key
+        );
         if (!events.length) {
-          alert(
-            "落とすイベントがありません。まずは取得＆（必要なら）フィルターしてね。"
-          );
+          alert(`${key} のイベントがありません（フィルター中かも）。`);
           return;
         }
-        const gummies = toGummies(events);
-        dropGummies(gummies, {
-          centerBias: 0.12, // より中央寄せに
-          restitution: 0.22,
-        });
-        setStatus(`グミ生成完了：${gummies.length}個のグミを落としました！`);
+        let gummies = toGummies(events);
+        gummies = diversifyColors(gummies, { threshold: 0.6, jitterDeg: 22 });
+        window.__world.addGummies(gummies);
+        setStatus(
+          `${key} のグミを追加：${gummies.length}個のグミを落としました！`
+        );
+      });
+
+      // 年間グミシャワー：3秒 / 12回（約250msごとに各月を一塊ずつ）
+      $showerBtn.addEventListener("click", () => {
+        const year = parseInt($yearSelect.value, 10);
+
+        // 現在のイベントを月別に
+        const monthlyMap = groupByMonth(currentDisplayedEvents);
+        const months = Array.from({ length: 12 }, (_, i) =>
+          String(i + 1).padStart(2, "0")
+        );
+        const batchKeys = months.map((m) => `${year}-${m}`);
+
+        const totalMs = 3000;
+        const intervalMs = Math.floor(totalMs / 12); // ≈ 250ms
+        let i = 0;
+
+        // 連打防止（既存タイマーがあれば止める）
+        if (window.__gummyTimer) clearInterval(window.__gummyTimer);
+
+        setStatus(`年間グミシャワー開始：3秒で12ヶ月分を投下します...`);
+
+        window.__gummyTimer = setInterval(() => {
+          if (i >= batchKeys.length) {
+            clearInterval(window.__gummyTimer);
+            window.__gummyTimer = null;
+            setStatus(`年間グミシャワー完了！`);
+            return;
+          }
+          const key = batchKeys[i++];
+          const batchEvents = monthlyMap.get(key) || [];
+          if (batchEvents.length) {
+            let batchGummies = toGummies(batchEvents);
+            batchGummies = diversifyColors(batchGummies, {
+              threshold: 0.6,
+              jitterDeg: 22,
+            });
+            window.__world.addGummies(batchGummies);
+          }
+          // イベントがない月はスキップ（空投下しない）
+        }, intervalMs);
       });
     </script>
   </body>
