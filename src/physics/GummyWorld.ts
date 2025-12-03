@@ -7,6 +7,8 @@ type Particle = {
   m: number;
   color: string;
   isBirthday?: boolean;
+  title?: string;
+  date?: string;
 };
 export class GummyWorld {
   private ctx: CanvasRenderingContext2D;
@@ -62,7 +64,15 @@ export class GummyWorld {
     const z = Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
     return mean + z * std;
   }
-  addGummies(gummies: { color: string; weight: number; isBirthday?: boolean }[]) {
+  addGummies(
+    gummies: {
+      color: string;
+      weight: number;
+      isBirthday?: boolean;
+      title?: string;
+      date?: string;
+    }[]
+  ) {
     const cx = this.W / 2,
       sigmaX = this.W * this.cfg.centerBias;
 
@@ -86,6 +96,8 @@ export class GummyWorld {
         m: Math.max(1, g.weight),
         color: g.color,
         isBirthday: g.isBirthday,
+        title: g.title,
+        date: g.date,
       });
     }
     if (this.particles.length > this.cfg.maxParticles)
@@ -340,7 +352,109 @@ export class GummyWorld {
         ctx.restore();
       }
     }
+
+    // ドラッグ中のグミに吹き出しを表示
+    if (this.draggedParticle && (this.draggedParticle.title || this.draggedParticle.date)) {
+      this.drawTooltip(this.draggedParticle);
+    }
   }
+
+  private drawTooltip(p: Particle) {
+    const ctx = this.ctx;
+    const padding = 8;
+    const lineHeight = 18;
+    const maxWidth = 200;
+
+    ctx.save();
+    ctx.font = '14px sans-serif';
+
+    // テキストを準備
+    const lines: string[] = [];
+    if (p.date) lines.push(p.date);
+    if (p.title) {
+      // タイトルが長い場合は折り返す
+      const words = p.title.split(' ');
+      let currentLine = '';
+      for (const word of words) {
+        const testLine = currentLine ? currentLine + ' ' + word : word;
+        const metrics = ctx.measureText(testLine);
+        if (metrics.width > maxWidth - padding * 2 && currentLine) {
+          lines.push(currentLine);
+          currentLine = word;
+        } else {
+          currentLine = testLine;
+        }
+      }
+      if (currentLine) lines.push(currentLine);
+    }
+
+    // 吹き出しのサイズを計算
+    let tooltipWidth = 0;
+    for (const line of lines) {
+      const metrics = ctx.measureText(line);
+      if (metrics.width > tooltipWidth) tooltipWidth = metrics.width;
+    }
+    tooltipWidth = Math.min(maxWidth, tooltipWidth + padding * 2);
+    const tooltipHeight = lines.length * lineHeight + padding * 2;
+
+    // 吹き出しの位置（グミの上）
+    let tooltipX = p.x - tooltipWidth / 2;
+    let tooltipY = p.y - p.r - tooltipHeight - 15;
+
+    // 画面外に出ないように調整
+    if (tooltipX < 5) tooltipX = 5;
+    if (tooltipX + tooltipWidth > this.W - 5) tooltipX = this.W - tooltipWidth - 5;
+    if (tooltipY < 5) tooltipY = p.y + p.r + 15;
+
+    // 吹き出しの背景（うっすら）
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+    ctx.lineWidth = 1;
+
+    // 角丸四角形
+    const radius = 6;
+    ctx.beginPath();
+    ctx.moveTo(tooltipX + radius, tooltipY);
+    ctx.lineTo(tooltipX + tooltipWidth - radius, tooltipY);
+    ctx.arcTo(
+      tooltipX + tooltipWidth,
+      tooltipY,
+      tooltipX + tooltipWidth,
+      tooltipY + radius,
+      radius
+    );
+    ctx.lineTo(tooltipX + tooltipWidth, tooltipY + tooltipHeight - radius);
+    ctx.arcTo(
+      tooltipX + tooltipWidth,
+      tooltipY + tooltipHeight,
+      tooltipX + tooltipWidth - radius,
+      tooltipY + tooltipHeight,
+      radius
+    );
+    ctx.lineTo(tooltipX + radius, tooltipY + tooltipHeight);
+    ctx.arcTo(
+      tooltipX,
+      tooltipY + tooltipHeight,
+      tooltipX,
+      tooltipY + tooltipHeight - radius,
+      radius
+    );
+    ctx.lineTo(tooltipX, tooltipY + radius);
+    ctx.arcTo(tooltipX, tooltipY, tooltipX + radius, tooltipY, radius);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // テキスト描画
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+    ctx.textBaseline = 'top';
+    for (let i = 0; i < lines.length; i++) {
+      ctx.fillText(lines[i], tooltipX + padding, tooltipY + padding + i * lineHeight);
+    }
+
+    ctx.restore();
+  }
+
   private loop() {
     this.step();
     this.draw();

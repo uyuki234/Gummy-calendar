@@ -37,6 +37,15 @@ function toGummies(events: CalendarEvent[]): Gummy[] {
     const text = [title, ev.description || '', ev.location || ''].join(' ');
     const isAllDay = !!ev.start?.date && !ev.start?.dateTime;
     const attendees = ev.attendees?.length || 0;
+
+    // 日付を取得
+    let dateStr = '';
+    if (ev.start?.date) {
+      dateStr = ev.start.date;
+    } else if (ev.start?.dateTime) {
+      dateStr = new Date(ev.start.dateTime).toLocaleDateString('ja-JP');
+    }
+
     let durationHours = 0;
     if (ev.start?.dateTime && ev.end?.dateTime) {
       durationHours = Math.max(
@@ -71,7 +80,7 @@ function toGummies(events: CalendarEvent[]): Gummy[] {
     }
     return {
       id: ev.id,
-      date: '',
+      date: dateStr,
       kind,
       title,
       color: col.hex,
@@ -98,7 +107,15 @@ export default function App() {
     canvasSize,
   }: {
     canvasRef: React.RefObject<HTMLCanvasElement>;
-    addGummies: (gummies: { color: string; weight: number; isBirthday?: boolean }[]) => void;
+    addGummies: (
+      gummies: {
+        color: string;
+        weight: number;
+        isBirthday?: boolean;
+        title?: string;
+        date?: string;
+      }[]
+    ) => void;
     clearGummies: () => void;
     shakeGummies: () => void;
     canvasSize: { width: number; height: number };
@@ -195,7 +212,7 @@ export default function App() {
             グミを削除
           </Button>
           <Button variant="outline" onClick={shakeGummies}>
-            揺さぶる
+            ゆらす
           </Button>
           <span className="text-sm text-muted-foreground">{status}</span>
         </div>
