@@ -1,4 +1,3 @@
-
 # エアライダーのグミシステム (テンプレート)
 
 Google Calendar の年間イベントを取得して、2Dのグミとして Matter.js で降らせる React + Vite のテンプレートです。

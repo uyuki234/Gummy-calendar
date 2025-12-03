@@ -24,7 +24,7 @@ export class GummyWorld {
     cellSize: 24,
   };
   constructor(canvas: HTMLCanvasElement, cfg?: Partial<typeof this.cfg>) {
-    this.ctx = canvas.getContext("2d")!;
+    this.ctx = canvas.getContext('2d')!;
     this.W = canvas.width;
     this.H = canvas.height;
     Object.assign(this.cfg, cfg || {});
@@ -40,10 +40,7 @@ export class GummyWorld {
     const cx = this.W / 2,
       sigmaX = this.W * this.cfg.centerBias;
     for (const g of gummies) {
-      const x = Math.max(
-        20,
-        Math.min(this.W - 20, cx + this.randNormal(0, sigmaX))
-      );
+      const x = Math.max(20, Math.min(this.W - 20, cx + this.randNormal(0, sigmaX)));
       this.particles.push({
         x,
         y: -Math.random() * 200 - 20,
@@ -56,7 +53,10 @@ export class GummyWorld {
     }
     if (this.particles.length > this.cfg.maxParticles)
       this.particles.splice(0, this.particles.length - this.cfg.maxParticles);
-    if (!this.raf) this.raf = requestAnimationFrame(this.loop);
+    if (!this.raf)
+      this.raf = requestAnimationFrame(() => {
+        this.loop();
+      });
   }
   clear() {
     this.particles.length = 0;
@@ -109,10 +109,7 @@ export class GummyWorld {
       const tx = -ny,
         ty = nx,
         relT = rvx * tx + rvy * ty,
-        jt = Math.max(
-          -this.cfg.frictionTangent,
-          Math.min(this.cfg.frictionTangent, relT)
-        );
+        jt = Math.max(-this.cfg.frictionTangent, Math.min(this.cfg.frictionTangent, relT));
       p.vx -= (jt * tx) / p.m;
       p.vy -= (jt * ty) / p.m;
       q.vx += (jt * tx) / q.m;
@@ -157,7 +154,7 @@ export class GummyWorld {
         [-1, 1],
       ];
     for (const [key, idxs] of grid) {
-      const [ix, iy] = key.split(",").map(Number);
+      const [ix, iy] = key.split(',').map(Number);
       for (const [dx, dy] of neigh) {
         const nk = `${ix + dx},${iy + dy}`,
           nbr = grid.get(nk);
@@ -177,14 +174,14 @@ export class GummyWorld {
       H = this.H,
       floorY = H - 10;
     ctx.clearRect(0, 0, W, H);
-    ctx.fillStyle = "#eee";
+    ctx.fillStyle = '#eee';
     ctx.fillRect(0, floorY, W, H - floorY);
     for (const p of this.particles) {
       ctx.fillStyle = p.color;
       ctx.beginPath();
       ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = "rgba(255,255,255,0.35)";
+      ctx.fillStyle = 'rgba(255,255,255,0.35)';
       ctx.beginPath();
       ctx.arc(p.x - p.r * 0.4, p.y - p.r * 0.45, p.r * 0.28, 0, Math.PI * 2);
       ctx.fill();
@@ -193,6 +190,8 @@ export class GummyWorld {
   private loop() {
     this.step();
     this.draw();
-    this.raf = requestAnimationFrame(this.loop);
+    this.raf = requestAnimationFrame(() => {
+      this.loop();
+    });
   }
 }

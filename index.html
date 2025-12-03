@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ja">
   <head>
     <meta charset="utf-8" />
@@ -6,77 +6,10 @@
     <title>グミカレンダー</title>
     <!-- Google Identity Services -->
     <script async defer src="https://accounts.google.com/gsi/client"></script>
-    <style>
-      body {
-        font-family: system-ui, sans-serif;
-        margin: 1.5rem;
-      }
-      .row {
-        display: flex;
-        gap: 0.5rem;
-        align-items: center;
-        flex-wrap: wrap;
-      }
-      canvas {
-        border: 1px solid #ddd;
-        display: block;
-        margin-top: 0.5rem;
-      }
-      details {
-        margin: 0.25rem 0;
-      }
-    </style>
   </head>
   <body>
-    <h1>グミカレンダー</h1>
-
-    <div class="row">
-      <label
-        ><select id="year-select">
-          <option>2023</option>
-          <option>2024</option>
-          <option selected>2025</option>
-          <option>2026</option></select
-        >年のカレンダーを</label
-      >
-      <button id="fetch-btn">グミにする</button>
-      <span id="status"></span>
-    </div>
-
-    <div class="row">
-      <!-- <button id="drop-btn">グミを落とす</button> -->
-      <!-- <button id="drop-month-btn">この月のグミを落とす</button> -->
-      <!-- <button id="shower-btn">年間グミシャワー（3秒/12回）</button> -->
-    </div>
-
-    <canvas id="gummy-canvas" width="900" height="500"></canvas>
-
-    <div class="row">
-      <label
-        >月：<select id="month-select">
-          <option>01</option>
-          <option>02</option>
-          <option>03</option>
-          <option>04</option>
-          <option>05</option>
-          <option>06</option>
-          <option>07</option>
-          <option>08</option>
-          <option>09</option>
-          <option>10</option>
-          <option>11</option>
-          <option>12</option>
-        </select></label
-      >
-      <input id="q" placeholder="キーワード（タイトル/説明）" />
-      <label><input type="checkbox" id="allDayOnly" /> 終日の予定のみ</label>
-      <button id="apply-filter">フィルター適用</button>
-      <button id="download-json">JSONダウンロード</button>
-    </div>
-
-    <ul id="event-list"></ul>
-
+    <div id="root"></div>
     <!-- Vite entry -->
-    <script type="module" src="/src/main.ts"></script>
+    <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

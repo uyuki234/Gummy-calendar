@@ -1,5 +1,5 @@
-import { clamp, wrapHue } from "./utils";
-import { scoreEmotion } from "./emotion";
+import { clamp, wrapHue } from './utils';
+import { scoreEmotion } from './emotion';
 
 function hslToHex(h: number, s: number, l: number) {
   s = clamp(s, 0, 1);
@@ -33,7 +33,7 @@ function hslToHex(h: number, s: number, l: number) {
     r = Math.round((r1 + m) * 255),
     g = Math.round((g1 + m) * 255),
     b = Math.round((b1 + m) * 255);
-  return `#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
+  return `#${[r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('')}`;
 }
 
 const BASE_HUE = { joy: 50, calm: 200, busy: 0, focus: 120, stress: 300 };
@@ -44,12 +44,14 @@ export function colorFromEmotionText(
 ) {
   const scores = scoreEmotion(text);
   // ベクトル平均
-  const entries = Object.entries(scores).filter(([k]) => k in BASE_HUE);
-  const totalW = entries.reduce((a, [, w]) => a + (w as number), 0) || 1;
+  const entries = Object.entries(scores).filter(([k]) => k in BASE_HUE) as Array<
+    [keyof typeof BASE_HUE, number]
+  >;
+  const totalW = entries.reduce((a, [, w]) => a + Number(w), 0) || 1;
   let vx = 0,
     vy = 0;
   for (const [k, w] of entries) {
-    const rad = (BASE_HUE[k as keyof typeof BASE_HUE] * Math.PI) / 180;
+    const rad = (BASE_HUE[k] * Math.PI) / 180;
     vx += Math.cos(rad) * (Number(w) / totalW);
     vy += Math.sin(rad) * (Number(w) / totalW);
   }
@@ -73,7 +75,7 @@ export function colorFromEmotionText(
 }
 
 export function diversifyColors<
-  T extends { color: string; hsl?: { h: number; s: number; l: number } }
+  T extends { color: string; hsl?: { h: number; s: number; l: number } },
 >(
   gummies: T[],
   opts?: Partial<{
@@ -94,13 +96,13 @@ export function diversifyColors<
     lightMax = 0.65,
   } = opts || {};
   const families = (h: number) => {
-    if (h < 30 || h >= 330) return "red";
-    if (h < 60) return "orange";
-    if (h < 90) return "yellow";
-    if (h < 150) return "green";
-    if (h < 210) return "cyan";
-    if (h < 270) return "blue";
-    return "purple";
+    if (h < 30 || h >= 330) return 'red';
+    if (h < 60) return 'orange';
+    if (h < 90) return 'yellow';
+    if (h < 150) return 'green';
+    if (h < 210) return 'cyan';
+    if (h < 270) return 'blue';
+    return 'purple';
   };
   const hueFromHex = (hex: string) => {
     const n = parseInt(hex.slice(1), 16);
@@ -115,8 +117,8 @@ export function diversifyColors<
       const rr = r / 255,
         gg = g / 255,
         bb = b / 255;
-      const l = (max + min) / 2,
-        s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+      // const l = (max + min) / 2,
+      //   s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
       switch (max) {
         case rr:
           h = (gg - bb) / d + (gg < bb ? 6 : 0);
