@@ -6,7 +6,7 @@ export function getYearRangeUTC(year: number) {
   const timeMax = new Date(Date.UTC(year, 11, 31, 23, 59, 59)).toISOString();
   return { timeMin, timeMax };
 }
-export function formatEventDate(ev: CalendarEvent) {
+export function formatEventDate(ev: CalendarEvent): string {
   if (ev.start?.date) return ev.start.date;
   if (ev.start?.dateTime) {
     const d = new Date(ev.start.dateTime);

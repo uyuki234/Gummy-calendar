@@ -9,6 +9,7 @@ type Particle = {
 };
 export class GummyWorld {
   private ctx: CanvasRenderingContext2D;
+  private canvas: HTMLCanvasElement;
   private W: number;
   private H: number;
   private raf = 0;
@@ -24,11 +25,19 @@ export class GummyWorld {
     cellSize: 24,
   };
   constructor(canvas: HTMLCanvasElement, cfg?: Partial<typeof this.cfg>) {
+    this.canvas = canvas;
     this.ctx = canvas.getContext('2d')!;
     this.W = canvas.width;
     this.H = canvas.height;
     Object.assign(this.cfg, cfg || {});
     this.loop = this.loop.bind(this);
+  }
+  setSize(width: number, height: number) {
+    if (width === this.W && height === this.H) return;
+    this.canvas.width = width;
+    this.canvas.height = height;
+    this.W = width;
+    this.H = height;
   }
   private randNormal(mean = 0, std = 1) {
     const u = 1 - Math.random(),

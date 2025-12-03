@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
 import {
   Select,
   SelectContent,
@@ -9,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { EventList } from '@/components/EventList';
 import { useGummyWorld } from '@/hooks/useGummyWorld';
 import { useGoogleAuth } from '@/hooks/useGoogleAuth';
 import { useCalendarEvents, CalendarEvent } from '@/hooks/useCalendarEvents';
@@ -79,7 +83,15 @@ export default function App() {
 
   const { initialize, getAccessToken } = useGoogleAuth();
   const { filteredEvents, fetchEvents, applyFilter } = useCalendarEvents();
-  const { canvasRef, addGummies } = useGummyWorld({
+  const {
+    canvasRef,
+    addGummies,
+    canvasSize,
+  }: {
+    canvasRef: React.RefObject<HTMLCanvasElement>;
+    addGummies: (gummies: { color: string; weight: number }[]) => void;
+    canvasSize: { width: number; height: number };
+  } = useGummyWorld({
     centerBias: 0.12,
     inwardForce: 0.0,
     restitution: 0.22,
@@ -97,6 +109,7 @@ export default function App() {
       await getAccessToken();
       const events = await fetchEvents(year);
       setStatus(`取得完了:${events.length}件 (まもなく年間グミシャワー開始…)`);
+      toast.success(`${events.length}件のイベントを取得しました`);
 
       // 1秒待ってから年間グミシャワー（3秒/12回）を自動開始
       setTimeout(() => {
@@ -107,6 +120,7 @@ export default function App() {
     } catch (e) {
       const message = e instanceof Error ? e.message : '取得に失敗しました';
       setStatus(`失敗：${message}`);
+      toast.error(`エラー: ${message}`);
     }
   };
 
@@ -169,9 +183,9 @@ export default function App() {
 
       <canvas
         ref={canvasRef}
-        width={900}
-        height={500}
-        className="border border-border rounded-md"
+        width={canvasSize.width}
+        height={canvasSize.height}
+        className="border border-border rounded-md w-full"
       />
 
       <Card className="p-4">
@@ -182,23 +196,25 @@ export default function App() {
             onChange={(e) => setKeyword(e.target.value)}
             className="max-w-xs"
           />
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
+          <div className="flex items-center gap-2">
+            <Checkbox
+              id="allDayOnly"
               checked={allDayOnly}
-              onChange={(e) => setAllDayOnly(e.target.checked)}
+              onCheckedChange={(checked) => setAllDayOnly(checked === true)}
             />
-            終日の予定のみ
-          </label>
+            <Label htmlFor="allDayOnly">終日の予定のみ</Label>
+          </div>
           <Button onClick={handleFilter} variant="secondary">
             フィルター適用
           </Button>
         </div>
       </Card>
 
-      <div className="text-sm text-muted-foreground">
+      <div className="text-sm text-muted-foreground mb-2">
         取得済みイベント: {filteredEvents.length}件
       </div>
+
+      <EventList events={filteredEvents} />
     </div>
   );
 }
