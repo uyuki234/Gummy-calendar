@@ -16,6 +16,11 @@ export class GummyWorld {
   private raf = 0;
   private particles: Particle[] = [];
   private birthdayIcon?: HTMLImageElement;
+  private draggedParticle: Particle | null = null;
+  private dragOffsetX = 0;
+  private dragOffsetY = 0;
+  private prevDragX = 0;
+  private prevDragY = 0;
   private cfg = {
     gravity: 0.45,
     air: 0.995,
@@ -38,6 +43,11 @@ export class GummyWorld {
     const img = new Image();
     img.src = whiteSvg;
     this.birthdayIcon = img;
+    // マウスイベントを設定
+    this.canvas.addEventListener('mousedown', this.handleMouseDown.bind(this));
+    this.canvas.addEventListener('mousemove', this.handleMouseMove.bind(this));
+    this.canvas.addEventListener('mouseup', this.handleMouseUp.bind(this));
+    this.canvas.addEventListener('mouseleave', this.handleMouseUp.bind(this));
   }
   setSize(width: number, height: number) {
     if (width === this.W && height === this.H) return;
@@ -89,12 +99,109 @@ export class GummyWorld {
     this.particles.length = 0;
   }
   shake() {
-    // 全てのグミにランダムな速度を加えて（大地震のような効果）
+    // 全てのグミにランダムな速度を加えて揺さぶる（大地震のような効果）
     for (const p of this.particles) {
       // 水平方向に大きな揺れ
       p.vx += (Math.random() - 0.5) * 30;
       // 垂直方向にも揺れを加える（上向きの力を強めに）
       p.vy += (Math.random() - 0.7) * 25;
+    }
+  }
+  private getMousePos(e: MouseEvent) {
+    const rect = this.canvas.getBoundingClientRect();
+    const scaleX = this.canvas.width / rect.width;
+    const scaleY = this.canvas.height / rect.height;
+    return {
+      x: (e.clientX - rect.left) * scaleX,
+      y: (e.clientY - rect.top) * scaleY,
+    };
+  }
+  private handleMouseDown(e: MouseEvent) {
+    const pos = this.getMousePos(e);
+    // クリック位置に最も近いグミを探す（後ろから描画されるので逆順に探索）
+    for (let i = this.particles.length - 1; i >= 0; i--) {
+      const p = this.particles[i];
+      const dx = pos.x - p.x;
+      const dy = pos.y - p.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist <= p.r) {
+        this.draggedParticle = p;
+        this.dragOffsetX = dx;
+        this.dragOffsetY = dy;
+        this.prevDragX = p.x;
+        this.prevDragY = p.y;
+        // ドラッグ中は速度をリセット
+        p.vx = 0;
+        p.vy = 0;
+        this.canvas.style.cursor = 'grabbing';
+        break;
+      }
+    }
+  }
+  private handleMouseMove(e: MouseEvent) {
+    const pos = this.getMousePos(e);
+    if (this.draggedParticle) {
+      // グミをマウス位置に移動
+      const newX = pos.x - this.dragOffsetX;
+      const newY = pos.y - this.dragOffsetY;
+      this.draggedParticle.x = newX;
+      this.draggedParticle.y = newY;
+
+      // ドラッグ速度を計算
+      const dragVx = newX - this.prevDragX;
+      const dragVy = newY - this.prevDragY;
+      this.prevDragX = newX;
+      this.prevDragY = newY;
+
+      // 他のグミとの衣突をチェック
+      for (const other of this.particles) {
+        if (other === this.draggedParticle) continue;
+
+        const dx = other.x - this.draggedParticle.x;
+        const dy = other.y - this.draggedParticle.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const minDist = this.draggedParticle.r + other.r;
+
+        if (dist < minDist && dist > 0) {
+          // 衡突している場合、他のグミを弾き飛ばす
+          const nx = dx / dist;
+          const ny = dy / dist;
+          const overlap = minDist - dist;
+
+          // 他のグミを押し出す
+          other.x += nx * overlap;
+          other.y += ny * overlap;
+
+          // ドラッグ速度に基づいて弾き飛ばす速度を付与
+          const impactForce = 2.5; // 衡撃の強さ
+          other.vx = nx * Math.abs(dragVx) * impactForce + dragVx * 0.8;
+          other.vy = ny * Math.abs(dragVy) * impactForce + dragVy * 0.8;
+        }
+      }
+
+      // 速度をリセットし続ける
+      this.draggedParticle.vx = 0;
+      this.draggedParticle.vy = 0;
+    } else {
+      // ホバー検知
+      let hovering = false;
+      for (let i = this.particles.length - 1; i >= 0; i--) {
+        const p = this.particles[i];
+        const dx = pos.x - p.x;
+        const dy = pos.y - p.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist <= p.r) {
+          hovering = true;
+          break;
+        }
+      }
+      this.canvas.style.cursor = hovering ? 'grab' : 'default';
+    }
+  }
+  private handleMouseUp() {
+    if (this.draggedParticle) {
+      this.draggedParticle = null;
+      this.canvas.style.cursor = 'default';
     }
   }
   private buildGrid() {
@@ -158,6 +265,9 @@ export class GummyWorld {
       rightX = this.W,
       cx = this.W / 2;
     for (const p of this.particles) {
+      // ドラッグ中のグミは物理演算をスキップ
+      if (p === this.draggedParticle) continue;
+
       p.vx += (cx - p.x) * this.cfg.inwardForce;
       p.vy += this.cfg.gravity;
       p.vx *= this.cfg.air;
