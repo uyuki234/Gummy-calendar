@@ -97,7 +97,7 @@ export function wireControls() {
       state.allEvents = await listEventsForYear(year);
       state.filteredEvents = state.allEvents; // 初期は全件
       renderMonthly($list, state.filteredEvents);
-      $status.textContent = `取得完了:${state.filteredEvents.length}件 (まもなく年間グミシャワー開始…)`;
+      $status.textContent = `取得完了:${state.filteredEvents.length}件 (カレンダーをグミにしています…)`;
       (window as any).currentEvents = state.filteredEvents; // 互換
 
       // 1秒待ってから年間グミシャワー（3秒/12回）を自動開始
