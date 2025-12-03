@@ -14,14 +14,21 @@ declare global {
 
 let gapiInited = false;
 let gisInited = false;
-let tokenClient: any;
+
+interface TokenClient {
+  callback: (resp: any) => void;
+  requestAccessToken: (options: { prompt: string }) => void;
+}
+let tokenClient: TokenClient;
 
 export function initGoogle(): Promise<void> {
   return new Promise((resolve, reject) => {
     const apiKey = import.meta.env.VITE_GOOGLE_API_KEY as string;
     const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID as string;
     if (!apiKey || !clientId) {
-      reject(new Error("Missing GOOGLE CLIENT ID or API KEY env vars"));
+      reject(
+        new Error("Missing Google Client ID or API Key environment variables")
+      );
       return;
     }
 
@@ -152,14 +159,16 @@ export function signOut() {
       // @ts-ignore
       google.accounts.oauth2.revoke(token.access_token, () => {});
     } catch (e) {
-      // ignore revoke errors
+      // Log revoke errors for debugging
+      console.error("Error revoking Google OAuth token:", e);
     }
     try {
       // clear gapi client token
       // @ts-ignore
       gapi.client.setToken({});
     } catch (e) {
-      // ignore
+      // Log errors clearing gapi client token for debugging
+      console.error("Error clearing gapi client token:", e);
     }
   }
 }

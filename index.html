@@ -11,13 +11,13 @@
       async
       defer
       src="https://apis.google.com/js/api.js"
-      onload="gapiLoaded&&gapiLoaded()"
+      onload="window.gapiLoaded && window.gapiLoaded()"
     ></script>
     <script
       async
       defer
       src="https://accounts.google.com/gsi/client"
-      onload="gisLoaded&&gisLoaded()"
+      onload="window.gisLoaded && window.gisLoaded()"
     ></script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
