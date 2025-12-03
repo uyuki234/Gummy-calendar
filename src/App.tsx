@@ -94,11 +94,13 @@ export default function App() {
     canvasRef,
     addGummies,
     clearGummies,
+    shakeGummies,
     canvasSize,
   }: {
     canvasRef: React.RefObject<HTMLCanvasElement>;
     addGummies: (gummies: { color: string; weight: number; isBirthday?: boolean }[]) => void;
     clearGummies: () => void;
+    shakeGummies: () => void;
     canvasSize: { width: number; height: number };
   } = useGummyWorld({
     centerBias: 0.12,
@@ -191,6 +193,9 @@ export default function App() {
           </Button>
           <Button variant="outline" onClick={clearGummies}>
             グミを削除
+          </Button>
+          <Button variant="outline" onClick={shakeGummies}>
+            揺さぶる
           </Button>
           <span className="text-sm text-muted-foreground">{status}</span>
         </div>

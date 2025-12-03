@@ -88,6 +88,15 @@ export class GummyWorld {
   clear() {
     this.particles.length = 0;
   }
+  shake() {
+    // 全てのグミにランダムな速度を加えて（大地震のような効果）
+    for (const p of this.particles) {
+      // 水平方向に大きな揺れ
+      p.vx += (Math.random() - 0.5) * 30;
+      // 垂直方向にも揺れを加える（上向きの力を強めに）
+      p.vy += (Math.random() - 0.7) * 25;
+    }
+  }
   private buildGrid() {
     const grid = new Map<string, number[]>(),
       s = this.cfg.cellSize;

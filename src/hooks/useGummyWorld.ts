@@ -10,6 +10,7 @@ interface UseGummyWorldReturn {
   canvasRef: React.RefObject<HTMLCanvasElement>;
   addGummies: (gummies: (GummyData & { isBirthday?: boolean })[]) => void;
   clearGummies: () => void;
+  shakeGummies: () => void;
   canvasSize: { width: number; height: number };
 }
 
@@ -74,10 +75,17 @@ export function useGummyWorld(config?: {
     }
   };
 
+  const shakeGummies = () => {
+    if (worldRef.current) {
+      worldRef.current.shake();
+    }
+  };
+
   return {
     canvasRef,
     addGummies,
     clearGummies,
+    shakeGummies,
     canvasSize,
   };
 }
