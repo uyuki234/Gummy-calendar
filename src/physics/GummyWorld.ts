@@ -5,7 +5,7 @@ type GummyMetadata = {
   isBirthday?: boolean;
   title?: string;
   date?: string;
-  shape: 'circle' | 'pencil' | 'heart' | 'star';
+  shape: 'circle' | 'square' | 'pencil' | 'heart' | 'star';
 };
 
 export class GummyWorld {
@@ -69,13 +69,14 @@ export class GummyWorld {
   private createBoundaryBodies() {
     const thickness = 100; // 壁の厚さを増やして貫通を防ぐ
     const margin = 10; // キャンバス端からの距離
+    const wallHeight = this.H + thickness * 2 + 1000; // 壁の高さを上方向に1000px拡張
 
-    // 左壁（キャンバスの左端より左）
+    // 左壁（キャンバスの左端より左、上に伸ばす）
     const leftWall = Bodies.rectangle(
       -thickness / 2 - margin,
-      this.H / 2,
+      this.H / 2 - 500, // 中心を上にシフト
       thickness,
-      this.H + thickness * 2,
+      wallHeight,
       {
         isStatic: true,
         label: 'wall_left',
@@ -84,12 +85,12 @@ export class GummyWorld {
       }
     );
 
-    // 右壁（キャンバスの右端より右）
+    // 右壁（キャンバスの右端より右、上に伸ばす）
     const rightWall = Bodies.rectangle(
       this.W + thickness / 2 + margin,
-      this.H / 2,
+      this.H / 2 - 500, // 中心を上にシフト
       thickness,
-      this.H + thickness * 2,
+      wallHeight,
       {
         isStatic: true,
         label: 'wall_right',
@@ -164,6 +165,66 @@ export class GummyWorld {
     return mean + z * std;
   }
 
+  private createCircleBody(x: number, y: number, radius: number, bodyOptions: any): any {
+    return Bodies.circle(x, y, radius, bodyOptions);
+  }
+
+  private createSquareBody(x: number, y: number, radius: number, bodyOptions: any): any {
+    const s = radius * 1.6;
+    return Bodies.rectangle(x, y, s, s, bodyOptions);
+  }
+
+  private createPencilBody(x: number, y: number, radius: number, bodyOptions: any): any {
+    const len = radius * 3.2;
+    const width = radius * 0.9;
+    const tipLength = width * 0.9;
+
+    const pencilVertices = [
+      { x: -len / 2, y: -width / 2 },
+      { x: len / 2, y: -width / 2 },
+      { x: len / 2 + tipLength, y: 0 },
+      { x: len / 2, y: width / 2 },
+      { x: -len / 2, y: width / 2 },
+    ];
+
+    const body = Bodies.fromVertices(x, y, [pencilVertices], bodyOptions);
+    Body.setAngularVelocity(body, (Math.random() - 0.5) * 0.1);
+    return body;
+  }
+
+  private createStarBody(x: number, y: number, radius: number, bodyOptions: any): any {
+    const vertices = [];
+    const spikes = 5;
+    const outer = radius * 1.8;
+    const inner = radius * 0.8;
+    let rot = (Math.PI / 2) * 3;
+
+    for (let i = 0; i < spikes; i++) {
+      vertices.push({
+        x: Math.cos(rot) * outer,
+        y: Math.sin(rot) * outer,
+      });
+      rot += Math.PI / spikes;
+      vertices.push({
+        x: Math.cos(rot) * inner,
+        y: Math.sin(rot) * inner,
+      });
+      rot += Math.PI / spikes;
+    }
+
+    return Bodies.fromVertices(x, y, [vertices], bodyOptions);
+  }
+
+  private createHeartBody(x: number, y: number, radius: number, bodyOptions: any): any {
+    const s = radius * 1.6;
+    const heartVertices = [
+      { x: 0, y: s * 0.3 },
+      { x: -s * 0.7, y: -s * 0.7 },
+      { x: s * 0.7, y: -s * 0.7 },
+    ];
+    return Bodies.fromVertices(x, y, [heartVertices], bodyOptions);
+  }
+
   addGummies(
     gummies: {
       color: string;
@@ -171,7 +232,7 @@ export class GummyWorld {
       isBirthday?: boolean;
       title?: string;
       date?: string;
-      shape?: 'circle' | 'pencil' | 'heart' | 'star';
+      shape?: 'circle' | 'square' | 'pencil' | 'heart' | 'star';
     }[]
   ) {
     const cx = this.W / 2;
@@ -192,7 +253,6 @@ export class GummyWorld {
       const vy = 0;
 
       // 剛体を作成
-      let body: any;
       const bodyOptions = {
         label: `gummy_${Date.now()}_${Math.random()}`,
         friction: this.cfg.friction,
@@ -200,76 +260,17 @@ export class GummyWorld {
         frictionAir: this.cfg.frictionAir,
       };
 
+      let body: any;
       if (g.shape === 'circle') {
-        body = Bodies.circle(x, y, radius, bodyOptions);
+        body = this.createCircleBody(x, y, radius, bodyOptions);
+      } else if (g.shape === 'square') {
+        body = this.createSquareBody(x, y, radius, bodyOptions);
       } else if (g.shape === 'pencil') {
-        // 鉛筆: 5頂点の多角形（本体 + 先端の三角形）
-        const len = radius * 3.2;
-        const width = radius * 0.9;
-        const tipLength = width * 0.9;
-
-        const pencilVertices = [
-          // 左上（消しゴム側）
-          { x: -len / 2, y: -width / 2 },
-          // 右上（先端の付け根）
-          { x: len / 2, y: -width / 2 },
-          // 先端
-          { x: len / 2 + tipLength, y: 0 },
-          // 右下（先端の付け根）
-          { x: len / 2, y: width / 2 },
-          // 左下（消しゴム側）
-          { x: -len / 2, y: width / 2 },
-        ];
-
-        body = Bodies.fromVertices(x, y, [pencilVertices], bodyOptions);
-        // 初期角速度を設定
-        Body.setAngularVelocity(body, (Math.random() - 0.5) * 0.1);
+        body = this.createPencilBody(x, y, radius, bodyOptions);
       } else if (g.shape === 'star') {
-        // スター: 頂点5つと窪み5つの10頂点で正確に定義
-        const vertices = [];
-        const spikes = 5;
-        const outer = radius * 1.8;
-        const inner = radius * 0.8;
-        let rot = (Math.PI / 2) * 3;
-
-        for (let i = 0; i < spikes; i++) {
-          // 外側の頂点
-          vertices.push({
-            x: Math.cos(rot) * outer,
-            y: Math.sin(rot) * outer,
-          });
-          rot += Math.PI / spikes;
-          // 内側の窪み
-          vertices.push({
-            x: Math.cos(rot) * inner,
-            y: Math.sin(rot) * inner,
-          });
-          rot += Math.PI / spikes;
-        }
-
-        body = Bodies.fromVertices(x, y, [vertices], bodyOptions);
+        body = this.createStarBody(x, y, radius, bodyOptions);
       } else {
-        // heart: 頂点4つと辺の中点を含む8頂点で定義
-        const s = radius * 1.6;
-        const heartVertices = [
-          // 下端（中央）
-          { x: 0, y: s * 0.2 },
-          // 左下から左上への辺の中点
-          { x: -s * 0.65, y: -s * 0.45 },
-          // 左上
-          { x: -s * 0.7, y: -s * 0.7 },
-          // 左上から頂点への辺の中点
-          { x: -s * 0.35, y: -s * 0.95 },
-          // 頂点（中央上部）
-          { x: 0, y: -s * 0.9 },
-          // 頂点から右上への辺の中点
-          { x: s * 0.35, y: -s * 0.95 },
-          // 右上
-          { x: s * 0.7, y: -s * 0.7 },
-          // 右上から右下への辺の中点
-          { x: s * 0.65, y: -s * 0.45 },
-        ];
-        body = Bodies.fromVertices(x, y, [heartVertices], bodyOptions);
+        body = this.createHeartBody(x, y, radius, bodyOptions);
       }
 
       // 初期速度を設定
@@ -464,6 +465,12 @@ export class GummyWorld {
       case 'circle':
         this.drawCircle(ctx, x, y, r, color);
         break;
+      case 'square':
+        ctx.translate(x, y);
+        ctx.rotate(angle);
+        ctx.translate(-x, -y);
+        this.drawSquare(ctx, x, y, r, color);
+        break;
       case 'pencil':
         ctx.translate(x, y);
         ctx.rotate(angle);
@@ -502,6 +509,27 @@ export class GummyWorld {
     ctx.fillStyle = 'rgba(255,255,255,0.35)';
     ctx.beginPath();
     ctx.arc(cx - r * 0.4, cy - r * 0.45, r * 0.28, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  private drawSquare(
+    ctx: CanvasRenderingContext2D,
+    cx: number,
+    cy: number,
+    r: number,
+    fill: string
+  ) {
+    // r は radius * 1.6 のサイズ（物理ボディのサイズ）
+    // 見た目を大きくするため 1.96倍に (1.4 * 1.4)
+    const visualSize = r * 1.96;
+    ctx.fillStyle = fill;
+    ctx.beginPath();
+    ctx.rect(cx - visualSize / 2, cy - visualSize / 2, visualSize, visualSize);
+    ctx.fill();
+    // ハイライト
+    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+    ctx.beginPath();
+    ctx.rect(cx - visualSize * 0.3, cy - visualSize * 0.35, visualSize * 0.3, visualSize * 0.25);
     ctx.fill();
   }
 

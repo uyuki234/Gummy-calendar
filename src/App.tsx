@@ -26,7 +26,7 @@ function toGummies(events: CalendarEvent[]): Array<{
   isBirthday?: boolean;
   title?: string;
   date?: string;
-  shape?: 'circle' | 'pencil' | 'heart' | 'star';
+  shape?: 'circle' | 'square' | 'pencil' | 'heart' | 'star';
 }> {
   return events.map((ev) => {
     const title = ev.summary || '';
@@ -61,15 +61,17 @@ function toGummies(events: CalendarEvent[]): Array<{
     // 簡易的な色選択
     const color = isAllDay ? '#FF6B6B' : '#4ECDC4';
 
-    // 簡易的な形状選択（四角を除外）
+    // 簡易的な形状選択
     const lower = title.toLowerCase();
-    const shape: 'circle' | 'pencil' | 'heart' | 'star' = /勉強|study/.test(lower)
-      ? 'pencil'
-      : /デート|love/.test(lower)
-        ? 'heart'
-        : /旅行|trip/.test(lower)
-          ? 'star'
-          : 'circle';
+    const shape: 'circle' | 'square' | 'pencil' | 'heart' | 'star' = /会議|meeting/.test(lower)
+      ? 'square'
+      : /勉強|study/.test(lower)
+        ? 'pencil'
+        : /デート|love/.test(lower)
+          ? 'heart'
+          : /旅行|trip/.test(lower)
+            ? 'star'
+            : 'circle';
 
     return {
       color,

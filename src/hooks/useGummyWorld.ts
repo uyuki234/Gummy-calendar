@@ -13,7 +13,7 @@ interface UseGummyWorldReturn {
       isBirthday?: boolean;
       title?: string;
       date?: string;
-      shape?: 'circle' | 'pencil' | 'heart' | 'star';
+      shape?: 'circle' | 'square' | 'pencil' | 'heart' | 'star';
     })[]
   ) => void;
   clearGummies: () => void;
@@ -88,7 +88,7 @@ export function useGummyWorld(config?: {
       isBirthday?: boolean;
       title?: string;
       date?: string;
-      shape?: 'circle' | 'pencil' | 'heart' | 'star';
+      shape?: 'circle' | 'square' | 'pencil' | 'heart' | 'star';
     })[]
   ) => {
     if (worldRef.current) {
