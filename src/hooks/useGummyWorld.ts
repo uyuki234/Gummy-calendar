@@ -7,7 +7,7 @@ type GummyData = {
 };
 
 interface UseGummyWorldReturn {
-  canvasRef: React.RefObject<HTMLCanvasElement>;
+  canvasRef: React.RefObject<HTMLCanvasElement | null>;
   addGummies: (
     gummies: (GummyData & {
       isBirthday?: boolean;
