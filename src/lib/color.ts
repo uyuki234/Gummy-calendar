@@ -1,5 +1,4 @@
 import { clamp, wrapHue } from './utils';
-import { scoreEmotion } from './emotion';
 
 export function hslToHex(h: number, s: number, l: number) {
   s = clamp(s, 0, 1);
@@ -34,44 +33,6 @@ export function hslToHex(h: number, s: number, l: number) {
     g = Math.round((g1 + m) * 255),
     b = Math.round((b1 + m) * 255);
   return `#${[r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('')}`;
-}
-
-const BASE_HUE = { joy: 50, calm: 200, busy: 0, focus: 120, stress: 300 };
-
-export function colorFromEmotionText(
-  text: string,
-  ctx: { isAllDay: boolean; attendees: number; durationHours: number }
-) {
-  const scores = scoreEmotion(text);
-  // ベクトル平均
-  const entries = Object.entries(scores).filter(([k]) => k in BASE_HUE) as Array<
-    [keyof typeof BASE_HUE, number]
-  >;
-  const totalW = entries.reduce((a, [, w]) => a + Number(w), 0) || 1;
-  let vx = 0,
-    vy = 0;
-  for (const [k, w] of entries) {
-    const rad = (BASE_HUE[k] * Math.PI) / 180;
-    vx += Math.cos(rad) * (Number(w) / totalW);
-    vy += Math.sin(rad) * (Number(w) / totalW);
-  }
-  let h = (Math.atan2(vy, vx) * 180) / Math.PI;
-  if (h < 0) h += 360;
-  // 彩度・明度
-  let s = 0.35 + scores.intensity * 0.55;
-  let l = ctx.isAllDay ? 0.65 : 0.55;
-  l -= Math.min(10, ctx.attendees) * 0.015;
-  l -= Math.min(12, ctx.durationHours) * 0.01;
-  // 暖色補正（茶色防止）
-  const warm = h >= 15 && h <= 75;
-  if (warm) {
-    s = Math.max(s, 0.6);
-    l = Math.max(l, 0.5);
-  }
-  s = clamp(s + scores.intensity * 0.1, 0, 1);
-  l = clamp(l, 0.35, 0.75);
-  const hex = hslToHex(wrapHue(h), s, l);
-  return { hex, h, s, l, scores };
 }
 
 export function diversifyColors<

@@ -15,104 +15,69 @@ import {
 import { EventList } from '@/components/EventList';
 import { useGummyWorld } from '@/hooks/useGummyWorld';
 import { useGoogleAuth } from '@/hooks/useGoogleAuth';
-import { useCalendarEvents, CalendarEvent } from '@/hooks/useCalendarEvents';
-import { colorFromEmotionText, diversifyColors, hslToHex } from '@/lib/color';
-import { classifyShape, ShapeKind } from '@/lib/shape';
+import { useCalendarEvents, type CalendarEvent } from '@/hooks/useCalendarEvents';
+import { diversifyColors } from '@/lib/color';
 import { monthKeyFromEvent } from '@/lib/calendar';
 import '@/index.css';
 
-type Gummy = {
-  id: string;
-  date: string;
-  kind: string;
-  title: string;
+function toGummies(events: CalendarEvent[]): Array<{
   color: string;
   weight: number;
-  hsl?: { h: number; s: number; l: number };
   isBirthday?: boolean;
-  shape?: ShapeKind;
-};
-
-function getSeasonBaseHue(month: number): number {
-  // 春: 3-5, 夏: 6-8, 秋: 9-11, 冬: 12,1,2
-  if (month >= 3 && month <= 5) return 330; // 春: ピンク
-  if (month >= 6 && month <= 8) return 120; // 夏: 緑
-  if (month >= 9 && month <= 11) return 30; // 秋: オレンジ
-  return 190; // 冬: 水色
-}
-
-function toGummies(events: CalendarEvent[]): Gummy[] {
+  title?: string;
+  date?: string;
+  shape?: 'circle' | 'pencil' | 'heart' | 'star';
+}> {
   return events.map((ev) => {
     const title = ev.summary || '';
-    const text = [title, ev.description || '', ev.location || ''].join(' ');
+    const dateStr =
+      ev.start?.date ||
+      (ev.start?.dateTime ? new Date(ev.start.dateTime).toLocaleDateString('ja-JP') : '');
+
+    // 簡易的な重みの計算
     const isAllDay = !!ev.start?.date && !ev.start?.dateTime;
     const attendees = ev.attendees?.length || 0;
-
-    // 日付を取得
-    let dateStr = '';
-    let month = 1;
-    if (ev.start?.date) {
-      dateStr = ev.start.date;
-      const m = ev.start.date.split('-')[1];
-      month = m ? Number(m) : 1;
-    } else if (ev.start?.dateTime) {
-      const d = new Date(ev.start.dateTime);
-      dateStr = d.toLocaleDateString('ja-JP');
-      month = d.getMonth() + 1;
-    }
-
     let durationHours = 0;
+
     if (ev.start?.dateTime && ev.end?.dateTime) {
       durationHours = Math.max(
         0,
         (new Date(ev.end.dateTime).getTime() - new Date(ev.start.dateTime).getTime()) / 3600000
       );
     }
-    // 季節ベース色を決定
-    const seasonHue = getSeasonBaseHue(month);
-    // 既存ロジックの色を取得
-    const col = colorFromEmotionText(text, {
-      isAllDay,
-      attendees,
-      durationHours,
-    });
-    // 季節色と既存色を混ぜる（70%既存, 30%季節）
-    const mixedH = (col.h * 0.7 + seasonHue * 0.3) % 360;
-    const mixedColor = {
-      ...col,
-      h: mixedH,
-      hex: hslToHex(mixedH, col.s, col.l),
-    };
-    const lower = text.toLowerCase();
-    const kind = /mtg|会議|meeting/.test(lower)
-      ? 'meeting'
-      : /勉強|講義|study|learn/.test(lower)
-        ? 'study'
-        : /開発|実装|コード|code|task|作業|課題/.test(lower)
-          ? 'work'
-          : /休暇|旅行|家族|買い物|生活|life/.test(lower)
-            ? 'life'
-            : 'other';
+
     const baseWeight = isAllDay ? 0.9 : 1.0;
     let weight = Math.min(
       4,
       baseWeight + Math.log2(attendees + 1) + Math.min(1.5, durationHours / 6)
     );
-    // 誕生日判定（タイトル/説明/場所に "誕生日" または "birthday"）
-    const isBirthday = /誕生日|birthday/i.test(text);
+
+    // 誕生日判定
+    const isBirthday = /誕生日|birthday/i.test(title);
     if (isBirthday) {
       weight = Math.min(4, weight * 1.5);
     }
+
+    // 簡易的な色選択
+    const color = isAllDay ? '#FF6B6B' : '#4ECDC4';
+
+    // 簡易的な形状選択（四角を除外）
+    const lower = title.toLowerCase();
+    const shape: 'circle' | 'pencil' | 'heart' | 'star' = /勉強|study/.test(lower)
+      ? 'pencil'
+      : /デート|love/.test(lower)
+        ? 'heart'
+        : /旅行|trip/.test(lower)
+          ? 'star'
+          : 'circle';
+
     return {
-      id: ev.id,
-      date: dateStr,
-      kind,
-      title,
-      color: mixedColor.hex,
+      color,
       weight,
-      hsl: { h: mixedColor.h, s: mixedColor.s, l: mixedColor.l },
       isBirthday,
-      shape: classifyShape(text),
+      title,
+      date: dateStr,
+      shape,
     };
   });
 }
@@ -125,31 +90,10 @@ export default function App() {
 
   const { initialize, getAccessToken } = useGoogleAuth();
   const { filteredEvents, fetchEvents, applyFilter } = useCalendarEvents();
-  const {
-    canvasRef,
-    addGummies,
-    clearGummies,
-    shakeGummies,
-    canvasSize,
-  }: {
-    canvasRef: React.RefObject<HTMLCanvasElement>;
-    addGummies: (
-      gummies: {
-        color: string;
-        weight: number;
-        isBirthday?: boolean;
-        title?: string;
-        date?: string;
-        shape?: ShapeKind;
-      }[]
-    ) => void;
-    clearGummies: () => void;
-    shakeGummies: () => void;
-    canvasSize: { width: number; height: number };
-  } = useGummyWorld({
+  const { canvasRef, addGummies, clearGummies, shakeGummies, canvasSize } = useGummyWorld({
     centerBias: 0.12,
     inwardForce: 0.0,
-    restitution: 0.22,
+    restitution: 0.8,
     maxParticles: 1000,
   });
 
@@ -166,7 +110,7 @@ export default function App() {
       setStatus(`取得完了:${events.length}件 (グミを生成中…)`);
       toast.success(`${events.length}件のイベントを取得しました`);
 
-      // 1秒待ってから年間グミシャワー（3秒/12回）を自動開始
+      // 1秒待ってからグミシャワー
       setTimeout(() => {
         if (events.length > 0) {
           startYearShower(events);
@@ -194,7 +138,7 @@ export default function App() {
       const batch = events.filter((ev) => monthKeyFromEvent(ev) === key);
       if (batch.length) {
         let gummies = toGummies(batch);
-        gummies = diversifyColors(gummies, { threshold: 0.6, jitterDeg: 22 });
+        gummies = diversifyColors(gummies);
         addGummies(gummies);
       }
     }, interval);
@@ -260,7 +204,8 @@ export default function App() {
         ref={canvasRef}
         width={canvasSize.width}
         height={canvasSize.height}
-        className="border border-border rounded-md w-full"
+        className="border border-border rounded-md w-full h-auto block"
+        style={{ maxWidth: '100%', display: 'block' }}
       />
 
       <Card className="p-4">

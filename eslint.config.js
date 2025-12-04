@@ -32,7 +32,7 @@ export default tseslint.config(
       'react/react-in-jsx-scope': 'off',
       'react/jsx-no-useless-fragment': ['warn', { allowExpressions: true }],
       'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
-      '@typescript-eslint/no-explicit-any': 'warn',
+      '@typescript-eslint/no-explicit-any': 'off',
     },
   }
 );
