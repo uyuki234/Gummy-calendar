@@ -1,69 +1,230 @@
-type Particle = {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  r: number;
-  m: number;
+import { Engine, World, Bodies, Body, Constraint } from 'matter-js';
+
+type GummyMetadata = {
   color: string;
   isBirthday?: boolean;
   title?: string;
   date?: string;
+  shape: 'circle' | 'square' | 'pencil' | 'heart' | 'star';
 };
+
 export class GummyWorld {
   private ctx: CanvasRenderingContext2D;
   private canvas: HTMLCanvasElement;
   private W: number;
   private H: number;
+  private engine: Engine;
+  private world: World;
+  private bodies: Array<any> = [];
+  private metadataMap: Map<string, GummyMetadata> = new Map();
   private raf = 0;
-  private particles: Particle[] = [];
-  private birthdayIcon?: HTMLImageElement;
-  private draggedParticle: Particle | null = null;
-  private dragOffsetX = 0;
-  private dragOffsetY = 0;
-  private prevDragX = 0;
-  private prevDragY = 0;
+  private dragConstraint: Constraint | null = null;
   private cfg = {
-    gravity: 0.45,
-    air: 0.995,
-    restitution: 0.25,
-    frictionTangent: 0.02,
+    gravity: 0.0015, // Matter.js の標準単位に合わせたスケーリング
+    air: 0.001, // frictionAir として使用
+    restitution: 0.9, // 反発係数を調整（より跳ねやすく）
+    friction: 0.005, // Body の friction
+    frictionAir: 0.001, // Body の frictionAir
     centerBias: 0.12,
     inwardForce: 0.0,
     maxParticles: 1000,
-    cellSize: 24,
   };
+
   constructor(canvas: HTMLCanvasElement, cfg?: Partial<typeof this.cfg>) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d')!;
     this.W = canvas.width;
     this.H = canvas.height;
     Object.assign(this.cfg, cfg || {});
+
+    // Matter.js エンジンを初期化
+    this.engine = Engine.create();
+    this.world = this.engine.world;
+    // Matter.js の標準重力（1）を基準に、0.0015 に調整
+    this.world.gravity.y = this.cfg.gravity * 1000; // 0.0015 * 1000 = 1.5
+    this.world.gravity.x = 0;
+
+    // イベントバインド
     this.loop = this.loop.bind(this);
-    // 誕生日アイコンを準備（白色のSVG）
-    const whiteSvg = `data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='white'><path stroke-linecap='round' stroke-linejoin='round' d='M12 8.25v-1.5m0 1.5c-1.355 0-2.697.056-4.024.166C6.845 8.51 6 9.473 6 10.608v2.513m6-4.871c1.355 0 2.697.056 4.024.166C17.155 8.51 18 9.473 18 10.608v2.513M15 8.25v-1.5m-6 1.5v-1.5m12 9.75-1.5.75a3.354 3.354 0 0 1-3 0 3.354 3.354 0 0 0-3 0 3.354 3.354 0 0 1-3 0 3.354 3.354 0 0 0-3 0 3.354 3.354 0 0 1-3 0L3 16.5m15-3.379a48.474 48.474 0 0 0-6-.371c-2.032 0-4.034.126-6 .371m12 0c.39.049.777.102 1.163.16 1.07.16 1.837 1.094 1.837 2.175v5.169c0 .621-.504 1.125-1.125 1.125H4.125A1.125 1.125 0 0 1 3 20.625v-5.17c0-1.08.768-2.014 1.837-2.174A47.78 47.78 0 0 1 6 13.12M12.265 3.11a.375.375 0 1 1-.53 0L12 2.845l.265.265Zm-3 0a.375.375 0 1 1-.53 0L9 2.845l.265.265Zm6 0a.375.375 0 1 1-.53 0L15 2.845l.265.265Z'/></svg>`;
-    const img = new Image();
-    img.src = whiteSvg;
-    this.birthdayIcon = img;
-    // マウスイベントを設定
-    this.canvas.addEventListener('mousedown', this.handleMouseDown.bind(this));
-    this.canvas.addEventListener('mousemove', this.handleMouseMove.bind(this));
-    this.canvas.addEventListener('mouseup', this.handleMouseUp.bind(this));
-    this.canvas.addEventListener('mouseleave', this.handleMouseUp.bind(this));
+
+    // マウスイベントをセット
+    this.canvas.addEventListener('mousedown', this.handleMouseDown);
+    this.canvas.addEventListener('mousemove', this.handleMouseMove);
+    this.canvas.addEventListener('mouseup', this.handleMouseUp);
+    this.canvas.addEventListener('mouseleave', this.handleMouseUp);
+
+    // ワールド境界（壁・床）を作成
+    this.setupWorldBoundaries();
+
+    // ループ開始
+    this.raf = requestAnimationFrame(() => {
+      this.loop();
+    });
   }
+
+  private setupWorldBoundaries() {
+    this.createBoundaryBodies();
+  }
+
+  private createBoundaryBodies() {
+    const thickness = 100; // 壁の厚さを増やして貫通を防ぐ
+    const margin = 10; // キャンバス端からの距離
+    const wallHeight = this.H + thickness * 2 + 1000; // 壁の高さを上方向に1000px拡張
+
+    // 左壁（キャンバスの左端より左、上に伸ばす）
+    const leftWall = Bodies.rectangle(
+      -thickness / 2 - margin,
+      this.H / 2 - 500, // 中心を上にシフト
+      thickness,
+      wallHeight,
+      {
+        isStatic: true,
+        label: 'wall_left',
+        frictionStatic: 0.8,
+        friction: 0.8,
+      }
+    );
+
+    // 右壁（キャンバスの右端より右、上に伸ばす）
+    const rightWall = Bodies.rectangle(
+      this.W + thickness / 2 + margin,
+      this.H / 2 - 500, // 中心を上にシフト
+      thickness,
+      wallHeight,
+      {
+        isStatic: true,
+        label: 'wall_right',
+        frictionStatic: 0.8,
+        friction: 0.8,
+      }
+    );
+
+    // 床（キャンバスの底部）
+    const floor = Bodies.rectangle(
+      this.W / 2,
+      this.H + thickness / 2,
+      this.W + thickness * 2,
+      thickness,
+      {
+        isStatic: true,
+        label: 'floor',
+        friction: 0.8,
+        restitution: this.cfg.restitution,
+      }
+    );
+
+    // 天井（落ちてくるオブジェクト用）
+    // グミの生成位置は y = -(Math.random() * 200 + 20) なので、-220 より上に配置
+    const ceiling = Bodies.rectangle(
+      this.W / 2,
+      -300, // グミ生成範囲より十分上に配置
+      this.W + thickness * 2,
+      thickness,
+      {
+        isStatic: true,
+        label: 'ceiling',
+        friction: 0.8,
+        restitution: this.cfg.restitution,
+      }
+    );
+
+    World.add(this.world, [leftWall, rightWall, floor, ceiling]);
+  }
+
+  private recreateWorldBoundaries() {
+    // 既存の壁・床・天井を削除
+    const staticBodies = this.world.bodies.filter(
+      (b: any) =>
+        b.isStatic && (b.label?.startsWith('wall_') || b.label === 'floor' || b.label === 'ceiling')
+    );
+    for (const body of staticBodies) {
+      World.remove(this.world, body);
+    }
+    // 新しい境界を作成
+    this.createBoundaryBodies();
+  }
+
   setSize(width: number, height: number) {
     if (width === this.W && height === this.H) return;
-    this.canvas.width = width;
-    this.canvas.height = height;
     this.W = width;
     this.H = height;
+    // Canvas 要素自体のサイズを設定
+    this.canvas.width = width;
+    this.canvas.height = height;
+    // CSS スタイルでも設定してスケーリングに対応
+    this.canvas.style.width = width + 'px';
+    this.canvas.style.height = height + 'px';
+    // 既存の境界を削除して新規作成
+    this.recreateWorldBoundaries();
   }
+
   private randNormal(mean = 0, std = 1) {
     const u = 1 - Math.random(),
       v = 1 - Math.random();
     const z = Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
     return mean + z * std;
   }
+
+  private createCircleBody(x: number, y: number, radius: number, bodyOptions: any): any {
+    return Bodies.circle(x, y, radius, bodyOptions);
+  }
+
+  private createSquareBody(x: number, y: number, radius: number, bodyOptions: any): any {
+    const s = radius * 1.6;
+    return Bodies.rectangle(x, y, s, s, bodyOptions);
+  }
+
+  private createPencilBody(x: number, y: number, radius: number, bodyOptions: any): any {
+    const len = radius * 3.2;
+    const width = radius * 0.9;
+    const tipLength = width * 0.9;
+
+    const pencilVertices = [
+      { x: -len / 2, y: -width / 2 },
+      { x: len / 2, y: -width / 2 },
+      { x: len / 2 + tipLength, y: 0 },
+      { x: len / 2, y: width / 2 },
+      { x: -len / 2, y: width / 2 },
+    ];
+
+    const body = Bodies.fromVertices(x, y, [pencilVertices], bodyOptions);
+    Body.setAngularVelocity(body, (Math.random() - 0.5) * 0.1);
+    return body;
+  }
+
+  private createStarBody(x: number, y: number, radius: number, bodyOptions: any): any {
+    const vertices = [];
+    const spikes = 5;
+    const outer = radius * 1.8;
+    const inner = radius * 0.8;
+    let rot = (Math.PI / 2) * 3;
+
+    for (let i = 0; i < spikes; i++) {
+      vertices.push({
+        x: Math.cos(rot) * outer,
+        y: Math.sin(rot) * outer,
+      });
+      rot += Math.PI / spikes;
+      vertices.push({
+        x: Math.cos(rot) * inner,
+        y: Math.sin(rot) * inner,
+      });
+      rot += Math.PI / spikes;
+    }
+
+    return Bodies.fromVertices(x, y, [vertices], bodyOptions);
+  }
+
+  private createHeartBody(x: number, y: number, radius: number, bodyOptions: any): any {
+    const s = radius * 1.6;
+    const heartVertices = [
+      { x: 0, y: s * 0.3 },
+      { x: -s * 0.7, y: -s * 0.7 },
+      { x: s * 0.7, y: -s * 0.7 },
+    ];
+    return Bodies.fromVertices(x, y, [heartVertices], bodyOptions);
+  }
+
   addGummies(
     gummies: {
       color: string;
@@ -71,54 +232,102 @@ export class GummyWorld {
       isBirthday?: boolean;
       title?: string;
       date?: string;
+      shape?: 'circle' | 'square' | 'pencil' | 'heart' | 'star';
     }[]
   ) {
-    const cx = this.W / 2,
-      sigmaX = this.W * this.cfg.centerBias;
+    const cx = this.W / 2;
+    const sigmaX = this.W * this.cfg.centerBias;
 
-    // グミサイズの計算式: r = Math.max(6, 5 + weight * 3)
-    // weightの範囲は0.9〜4なので、半径の理論上の最大値は 5 + 4 * 3 = 17
     const theoreticalMaxRadius = 5 + 4 * 3; // 17
-    // 誕生日グミは常に理論上の最大値の1.5倍のサイズ
     const birthdayRadius = theoreticalMaxRadius * 1.5; // 25.5
 
     for (const g of gummies) {
       const x = Math.max(20, Math.min(this.W - 20, cx + this.randNormal(0, sigmaX)));
-      // 誕生日の場合は固定サイズ、それ以外は通常の計算
+      const y = -(Math.random() * 200 + 20);
+
       const baseRadius = Math.max(6, 5 + g.weight * 3);
       const radius = g.isBirthday ? birthdayRadius : baseRadius;
-      this.particles.push({
-        x,
-        y: -Math.random() * 200 - 20,
-        vx: (Math.random() - 0.5) * 0.25,
-        vy: 0,
-        r: radius,
-        m: Math.max(1, g.weight),
+
+      // 初期速度
+      const vx = (Math.random() - 0.5) * 0.25;
+      const vy = 0;
+
+      // 剛体を作成
+      const bodyOptions = {
+        label: `gummy_${Date.now()}_${Math.random()}`,
+        friction: this.cfg.friction,
+        restitution: this.cfg.restitution,
+        frictionAir: this.cfg.frictionAir,
+      };
+
+      let body: any;
+      if (g.shape === 'circle') {
+        body = this.createCircleBody(x, y, radius, bodyOptions);
+      } else if (g.shape === 'square') {
+        body = this.createSquareBody(x, y, radius, bodyOptions);
+      } else if (g.shape === 'pencil') {
+        body = this.createPencilBody(x, y, radius, bodyOptions);
+      } else if (g.shape === 'star') {
+        body = this.createStarBody(x, y, radius, bodyOptions);
+      } else {
+        body = this.createHeartBody(x, y, radius, bodyOptions);
+      }
+
+      // 初期速度を設定
+      Body.setVelocity(body, { x: vx, y: vy });
+
+      // ワールドに追加
+      World.add(this.world, body);
+      this.bodies.push(body);
+
+      // メタデータを保存
+      this.metadataMap.set(body.id.toString(), {
         color: g.color,
         isBirthday: g.isBirthday,
         title: g.title,
         date: g.date,
+        shape: g.shape || 'circle',
       });
     }
-    if (this.particles.length > this.cfg.maxParticles)
-      this.particles.splice(0, this.particles.length - this.cfg.maxParticles);
-    if (!this.raf)
+
+    // 粒子数制限
+    if (this.bodies.length > this.cfg.maxParticles) {
+      const toRemove = this.bodies.slice(0, this.bodies.length - this.cfg.maxParticles);
+      for (const body of toRemove) {
+        World.remove(this.world, body);
+      }
+      this.bodies = this.bodies.slice(this.bodies.length - this.cfg.maxParticles);
+    }
+
+    if (!this.raf) {
       this.raf = requestAnimationFrame(() => {
         this.loop();
       });
-  }
-  clear() {
-    this.particles.length = 0;
-  }
-  shake() {
-    // 全てのグミにランダムな速度を加えて揺さぶる（大地震のような効果）
-    for (const p of this.particles) {
-      // 水平方向に大きな揺れ
-      p.vx += (Math.random() - 0.5) * 30;
-      // 垂直方向にも揺れを加える（上向きの力を強めに）
-      p.vy += (Math.random() - 0.7) * 25;
     }
   }
+
+  clear() {
+    // すべての剛体をワールドから削除
+    for (const body of this.bodies) {
+      World.remove(this.world, body);
+    }
+    this.bodies.length = 0;
+    this.metadataMap.clear();
+  }
+
+  shake() {
+    // 全グミにランダムな速度を追加
+    for (const body of this.bodies) {
+      const randomVx = (Math.random() - 0.5) * 30;
+      const randomVy = (Math.random() - 0.7) * 25;
+
+      Body.setVelocity(body, {
+        x: body.velocity.x + randomVx,
+        y: body.velocity.y + randomVy,
+      });
+    }
+  }
+
   private getMousePos(e: MouseEvent) {
     const rect = this.canvas.getBoundingClientRect();
     const scaleX = this.canvas.width / rect.width;
@@ -128,336 +337,321 @@ export class GummyWorld {
       y: (e.clientY - rect.top) * scaleY,
     };
   }
-  private handleMouseDown(e: MouseEvent) {
-    const pos = this.getMousePos(e);
-    // クリック位置に最も近いグミを探す（後ろから描画されるので逆順に探索）
-    for (let i = this.particles.length - 1; i >= 0; i--) {
-      const p = this.particles[i];
-      const dx = pos.x - p.x;
-      const dy = pos.y - p.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist <= p.r) {
-        this.draggedParticle = p;
-        this.dragOffsetX = dx;
-        this.dragOffsetY = dy;
-        this.prevDragX = p.x;
-        this.prevDragY = p.y;
-        // ドラッグ中は速度をリセット
-        p.vx = 0;
-        p.vy = 0;
-        this.canvas.style.cursor = 'grabbing';
-        break;
+
+  private findBodyAt(x: number, y: number): any {
+    // 逆順に探索（最新のものが上）
+    for (let i = this.bodies.length - 1; i >= 0; i--) {
+      const body: any = this.bodies[i];
+
+      // Matter.js のデータを使用して正確に判定
+      if (this.isPointInBody(body, { x, y })) {
+        return body;
       }
     }
+    return null;
   }
-  private handleMouseMove(e: MouseEvent) {
-    const pos = this.getMousePos(e);
-    if (this.draggedParticle) {
-      // グミをマウス位置に移動
-      const newX = pos.x - this.dragOffsetX;
-      const newY = pos.y - this.dragOffsetY;
-      this.draggedParticle.x = newX;
-      this.draggedParticle.y = newY;
 
-      // ドラッグ速度を計算
-      const dragVx = newX - this.prevDragX;
-      const dragVy = newY - this.prevDragY;
-      this.prevDragX = newX;
-      this.prevDragY = newY;
+  private isPointInBody(body: any, point: { x: number; y: number }): boolean {
+    // Matter.js の vertices を使用して正確に判定
+    if (body.vertices && body.vertices.length > 0) {
+      // 多角形の内部判定（Ray Casting Algorithm）
+      const vertices = body.vertices;
+      let inside = false;
 
-      // 他のグミとの衣突をチェック
-      for (const other of this.particles) {
-        if (other === this.draggedParticle) continue;
+      for (let i = 0, j = vertices.length - 1; i < vertices.length; j = i++) {
+        const xi = vertices[i].x;
+        const yi = vertices[i].y;
+        const xj = vertices[j].x;
+        const yj = vertices[j].y;
 
-        const dx = other.x - this.draggedParticle.x;
-        const dy = other.y - this.draggedParticle.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        const minDist = this.draggedParticle.r + other.r;
+        const intersect =
+          yi > point.y !== yj > point.y && point.x < ((xj - xi) * (point.y - yi)) / (yj - yi) + xi;
 
-        if (dist < minDist && dist > 0) {
-          // 衡突している場合、他のグミを弾き飛ばす
-          const nx = dx / dist;
-          const ny = dy / dist;
-          const overlap = minDist - dist;
-
-          // 他のグミを押し出す
-          other.x += nx * overlap;
-          other.y += ny * overlap;
-
-          // ドラッグ速度に基づいて弾き飛ばす速度を付与
-          const impactForce = 2.5; // 衡撃の強さ
-          other.vx = nx * Math.abs(dragVx) * impactForce + dragVx * 0.8;
-          other.vy = ny * Math.abs(dragVy) * impactForce + dragVy * 0.8;
-        }
+        if (intersect) inside = !inside;
       }
 
-      // 速度をリセットし続ける
-      this.draggedParticle.vx = 0;
-      this.draggedParticle.vy = 0;
+      return inside;
+    }
+
+    // フォールバック: circleRadius を使用
+    if (body.circleRadius !== undefined && body.circleRadius !== null) {
+      const dx = point.x - body.position.x;
+      const dy = point.y - body.position.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      return dist <= body.circleRadius;
+    }
+
+    return false;
+  }
+
+  private readonly handleMouseDown = (e: MouseEvent) => {
+    const pos = this.getMousePos(e);
+    const body = this.findBodyAt(pos.x, pos.y);
+
+    if (body) {
+      // Constraint でマウス位置に拘束
+      this.dragConstraint = Constraint.create({
+        bodyB: body,
+        pointB: { x: pos.x - body.position.x, y: pos.y - body.position.y },
+        pointA: { x: pos.x, y: pos.y },
+        length: 0,
+        stiffness: 1,
+      });
+
+      World.add(this.world, this.dragConstraint);
+      this.canvas.style.cursor = 'grabbing';
+    }
+  };
+
+  private readonly handleMouseMove = (e: MouseEvent) => {
+    const pos = this.getMousePos(e);
+
+    if (this.dragConstraint) {
+      // Constraint の pointA をマウス位置に更新
+      this.dragConstraint.pointA = { x: pos.x, y: pos.y };
     } else {
       // ホバー検知
-      let hovering = false;
-      for (let i = this.particles.length - 1; i >= 0; i--) {
-        const p = this.particles[i];
-        const dx = pos.x - p.x;
-        const dy = pos.y - p.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist <= p.r) {
-          hovering = true;
-          break;
-        }
-      }
-      this.canvas.style.cursor = hovering ? 'grab' : 'default';
+      const body = this.findBodyAt(pos.x, pos.y);
+      this.canvas.style.cursor = body ? 'grab' : 'default';
     }
-  }
-  private handleMouseUp() {
-    if (this.draggedParticle) {
-      this.draggedParticle = null;
+  };
+
+  private readonly handleMouseUp = () => {
+    if (this.dragConstraint) {
+      World.remove(this.world, this.dragConstraint);
+      this.dragConstraint = null;
       this.canvas.style.cursor = 'default';
     }
-  }
-  private buildGrid() {
-    const grid = new Map<string, number[]>(),
-      s = this.cfg.cellSize;
-    for (let i = 0; i < this.particles.length; i++) {
-      const p = this.particles[i];
-      const ix = Math.floor(p.x / s),
-        iy = Math.floor(p.y / s);
-      const k = `${ix},${iy}`;
-      const arr = grid.get(k) || [];
-      arr.push(i);
-      grid.set(k, arr);
-    }
-    return grid;
-  }
-  private resolve(i: number, j: number) {
-    const p = this.particles[i],
-      q = this.particles[j];
-    const dx = q.x - p.x,
-      dy = q.y - p.y,
-      rSum = p.r + q.r;
-    const d2 = dx * dx + dy * dy;
-    if (d2 <= 0 || d2 >= rSum * rSum) return;
-    const d = Math.sqrt(d2) || 0.0001,
-      nx = dx / d,
-      ny = dy / d,
-      overlap = rSum - d;
-    const tm = p.m + q.m,
-      pushP = overlap * (q.m / tm),
-      pushQ = overlap * (p.m / tm);
-    p.x -= nx * pushP;
-    p.y -= ny * pushP;
-    q.x += nx * pushQ;
-    q.y += ny * pushQ;
-    const rvx = q.vx - p.vx,
-      rvy = q.vy - p.vy,
-      relN = rvx * nx + rvy * ny;
-    if (relN < 0) {
-      const e = this.cfg.restitution,
-        j = (-(1 + e) * relN) / (1 / p.m + 1 / q.m),
-        jx = j * nx,
-        jy = j * ny;
-      p.vx -= jx / p.m;
-      p.vy -= jy / p.m;
-      q.vx += jx / q.m;
-      q.vy += jy / q.m;
-      const tx = -ny,
-        ty = nx,
-        relT = rvx * tx + rvy * ty,
-        jt = Math.max(-this.cfg.frictionTangent, Math.min(this.cfg.frictionTangent, relT));
-      p.vx -= (jt * tx) / p.m;
-      p.vy -= (jt * ty) / p.m;
-      q.vx += (jt * tx) / q.m;
-      q.vy += (jt * ty) / q.m;
-    }
-  }
-  private step() {
-    const floorY = this.H - 10,
-      leftX = 0,
-      rightX = this.W,
-      cx = this.W / 2;
-    for (const p of this.particles) {
-      // ドラッグ中のグミは物理演算をスキップ
-      if (p === this.draggedParticle) continue;
+  };
 
-      p.vx += (cx - p.x) * this.cfg.inwardForce;
-      p.vy += this.cfg.gravity;
-      p.vx *= this.cfg.air;
-      p.vy *= this.cfg.air;
-      p.x += p.vx;
-      p.y += p.vy;
-      if (p.x - p.r < leftX) {
-        p.x = leftX + p.r;
-        p.vx *= -this.cfg.restitution;
-      } else if (p.x + p.r > rightX) {
-        p.x = rightX - p.r;
-        p.vx *= -this.cfg.restitution;
-      }
-      if (p.y + p.r > floorY) {
-        p.y = floorY - p.r;
-        p.vy *= -this.cfg.restitution;
-        if (Math.abs(p.vy) < 0.25) p.vy = 0;
-      }
-    }
-    const grid = this.buildGrid(),
-      neigh = [
-        [0, 0],
-        [1, 0],
-        [0, 1],
-        [1, 1],
-        [-1, 0],
-        [0, -1],
-        [-1, -1],
-        [1, -1],
-        [-1, 1],
-      ];
-    for (const [key, idxs] of grid) {
-      const [ix, iy] = key.split(',').map(Number);
-      for (const [dx, dy] of neigh) {
-        const nk = `${ix + dx},${iy + dy}`,
-          nbr = grid.get(nk);
-        if (!nbr) continue;
-        for (const i of idxs) {
-          for (const j of nbr) {
-            if (j <= i) continue;
-            this.resolve(i, j);
-          }
-        }
-      }
-    }
-  }
   private draw() {
-    const ctx = this.ctx,
-      W = this.W,
-      H = this.H,
-      floorY = H - 10;
-    ctx.clearRect(0, 0, W, H);
-    ctx.fillStyle = '#eee';
-    ctx.fillRect(0, floorY, W, H - floorY);
-    for (const p of this.particles) {
-      ctx.fillStyle = p.color;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = 'rgba(255,255,255,0.35)';
-      ctx.beginPath();
-      ctx.arc(p.x - p.r * 0.4, p.y - p.r * 0.45, p.r * 0.28, 0, Math.PI * 2);
-      ctx.fill();
-      // 誕生日アイコンのオーバーレイ
-      if (p.isBirthday && this.birthdayIcon && this.birthdayIcon.complete) {
-        const size = p.r * 1.4;
-        ctx.save();
-        ctx.globalAlpha = 0.95;
-        ctx.drawImage(this.birthdayIcon, p.x - size * 0.5, p.y - size * 0.5, size, size);
-        ctx.restore();
-      }
-    }
+    const ctx = this.ctx;
+    const W = this.W;
+    const H = this.H;
 
-    // ドラッグ中のグミに吹き出しを表示
-    if (this.draggedParticle && (this.draggedParticle.title || this.draggedParticle.date)) {
-      this.drawTooltip(this.draggedParticle);
+    ctx.clearRect(0, 0, W, H);
+
+    // 各剛体を描画
+    for (const body of this.bodies) {
+      const metadata = this.metadataMap.get(body.id.toString());
+      if (!metadata) continue;
+
+      const x = body.position.x;
+      const y = body.position.y;
+      const angle = body.angle;
+
+      // 形状に応じて描画
+      this.drawGummy(ctx, metadata.shape, x, y, body.circleRadius || 10, metadata.color, angle);
+
+      // 誕生日マーク
+      if (metadata.isBirthday) {
+        this.drawBirthdayMark(ctx, x, y, body.circleRadius || 10);
+      }
     }
   }
 
-  private drawTooltip(p: Particle) {
-    const ctx = this.ctx;
-    const padding = 8;
-    const lineHeight = 18;
-    const maxWidth = 200;
-
+  private drawGummy(
+    ctx: CanvasRenderingContext2D,
+    shape: string,
+    x: number,
+    y: number,
+    r: number,
+    color: string,
+    angle: number
+  ) {
     ctx.save();
-    ctx.font = '14px sans-serif';
 
-    // テキストを準備
-    const lines: string[] = [];
-    if (p.date) lines.push(p.date);
-    if (p.title) {
-      // タイトルが長い場合は折り返す
-      const words = p.title.split(' ');
-      let currentLine = '';
-      for (const word of words) {
-        const testLine = currentLine ? currentLine + ' ' + word : word;
-        const metrics = ctx.measureText(testLine);
-        if (metrics.width > maxWidth - padding * 2 && currentLine) {
-          lines.push(currentLine);
-          currentLine = word;
-        } else {
-          currentLine = testLine;
-        }
-      }
-      if (currentLine) lines.push(currentLine);
-    }
-
-    // 吹き出しのサイズを計算
-    let tooltipWidth = 0;
-    for (const line of lines) {
-      const metrics = ctx.measureText(line);
-      if (metrics.width > tooltipWidth) tooltipWidth = metrics.width;
-    }
-    tooltipWidth = Math.min(maxWidth, tooltipWidth + padding * 2);
-    const tooltipHeight = lines.length * lineHeight + padding * 2;
-
-    // 吹き出しの位置（グミの上）
-    let tooltipX = p.x - tooltipWidth / 2;
-    let tooltipY = p.y - p.r - tooltipHeight - 15;
-
-    // 画面外に出ないように調整
-    if (tooltipX < 5) tooltipX = 5;
-    if (tooltipX + tooltipWidth > this.W - 5) tooltipX = this.W - tooltipWidth - 5;
-    if (tooltipY < 5) tooltipY = p.y + p.r + 15;
-
-    // 吹き出しの背景（うっすら）
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
-    ctx.lineWidth = 1;
-
-    // 角丸四角形
-    const radius = 6;
-    ctx.beginPath();
-    ctx.moveTo(tooltipX + radius, tooltipY);
-    ctx.lineTo(tooltipX + tooltipWidth - radius, tooltipY);
-    ctx.arcTo(
-      tooltipX + tooltipWidth,
-      tooltipY,
-      tooltipX + tooltipWidth,
-      tooltipY + radius,
-      radius
-    );
-    ctx.lineTo(tooltipX + tooltipWidth, tooltipY + tooltipHeight - radius);
-    ctx.arcTo(
-      tooltipX + tooltipWidth,
-      tooltipY + tooltipHeight,
-      tooltipX + tooltipWidth - radius,
-      tooltipY + tooltipHeight,
-      radius
-    );
-    ctx.lineTo(tooltipX + radius, tooltipY + tooltipHeight);
-    ctx.arcTo(
-      tooltipX,
-      tooltipY + tooltipHeight,
-      tooltipX,
-      tooltipY + tooltipHeight - radius,
-      radius
-    );
-    ctx.lineTo(tooltipX, tooltipY + radius);
-    ctx.arcTo(tooltipX, tooltipY, tooltipX + radius, tooltipY, radius);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-
-    // テキスト描画
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
-    ctx.textBaseline = 'top';
-    for (let i = 0; i < lines.length; i++) {
-      ctx.fillText(lines[i], tooltipX + padding, tooltipY + padding + i * lineHeight);
+    switch (shape) {
+      case 'circle':
+        this.drawCircle(ctx, x, y, r, color);
+        break;
+      case 'square':
+        ctx.translate(x, y);
+        ctx.rotate(angle);
+        ctx.translate(-x, -y);
+        this.drawSquare(ctx, x, y, r, color);
+        break;
+      case 'pencil':
+        ctx.translate(x, y);
+        ctx.rotate(angle);
+        ctx.translate(-x, -y);
+        this.drawPencil(ctx, x, y, r, color);
+        break;
+      case 'star':
+        ctx.translate(x, y);
+        ctx.rotate(angle);
+        ctx.translate(-x, -y);
+        this.drawStar(ctx, x, y, r, color);
+        break;
+      case 'heart':
+        ctx.translate(x, y);
+        ctx.rotate(angle);
+        ctx.translate(-x, -y);
+        this.drawHeart(ctx, x, y, r, color);
+        break;
     }
 
     ctx.restore();
   }
 
+  private drawCircle(
+    ctx: CanvasRenderingContext2D,
+    cx: number,
+    cy: number,
+    r: number,
+    fill: string
+  ) {
+    ctx.fillStyle = fill;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fill();
+    // ハイライト
+    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+    ctx.beginPath();
+    ctx.arc(cx - r * 0.4, cy - r * 0.45, r * 0.28, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  private drawSquare(
+    ctx: CanvasRenderingContext2D,
+    cx: number,
+    cy: number,
+    r: number,
+    fill: string
+  ) {
+    // r は radius * 1.6 のサイズ（物理ボディのサイズ）
+    // 見た目を大きくするため 1.96倍に (1.4 * 1.4)
+    const visualSize = r * 1.96;
+    ctx.fillStyle = fill;
+    ctx.beginPath();
+    ctx.rect(cx - visualSize / 2, cy - visualSize / 2, visualSize, visualSize);
+    ctx.fill();
+    // ハイライト
+    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+    ctx.beginPath();
+    ctx.rect(cx - visualSize * 0.3, cy - visualSize * 0.35, visualSize * 0.3, visualSize * 0.25);
+    ctx.fill();
+  }
+
+  private drawStar(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, fill: string) {
+    const spikes = 5;
+    const outer = r * 1.8;
+    const inner = r * 0.8;
+    let rot = (Math.PI / 2) * 3;
+
+    ctx.fillStyle = fill;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - outer);
+    for (let i = 0; i < spikes; i++) {
+      const x = cx + Math.cos(rot) * outer;
+      const y = cy + Math.sin(rot) * outer;
+      ctx.lineTo(x, y);
+      rot += Math.PI / spikes;
+
+      const x2 = cx + Math.cos(rot) * inner;
+      const y2 = cy + Math.sin(rot) * inner;
+      ctx.lineTo(x2, y2);
+      rot += Math.PI / spikes;
+    }
+    ctx.closePath();
+    ctx.fill();
+    // ハイライト
+    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+    ctx.beginPath();
+    ctx.arc(cx - r * 0.4, cy - r * 0.4, r * 0.25, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  private drawHeart(
+    ctx: CanvasRenderingContext2D,
+    cx: number,
+    cy: number,
+    r: number,
+    fill: string
+  ) {
+    const s = r * 1.6;
+    ctx.fillStyle = fill;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy + s * 0.2);
+    ctx.bezierCurveTo(cx - s, cy - s * 0.5, cx - s * 0.8, cy - s * 1.4, cx, cy - s * 0.9);
+    ctx.bezierCurveTo(cx + s * 0.8, cy - s * 1.4, cx + s, cy - s * 0.5, cx, cy + s * 0.2);
+    ctx.closePath();
+    ctx.fill();
+    // ハイライト
+    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+    ctx.beginPath();
+    ctx.arc(cx - r * 0.3, cy - r * 0.3, r * 0.2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  private drawPencil(
+    ctx: CanvasRenderingContext2D,
+    cx: number,
+    cy: number,
+    r: number,
+    fill: string
+  ) {
+    const len = r * 3.2;
+    const width = r * 0.9;
+
+    // 本体
+    ctx.fillStyle = fill;
+    ctx.fillRect(cx - len / 2, cy - width / 2, len, width);
+
+    // 先端
+    ctx.fillStyle = this.shade(fill, -0.25);
+    ctx.beginPath();
+    ctx.moveTo(cx + len / 2, cy - width / 2);
+    ctx.lineTo(cx + len / 2 + width * 0.9, cy);
+    ctx.lineTo(cx + len / 2, cy + width / 2);
+    ctx.closePath();
+    ctx.fill();
+
+    // 消しゴム
+    ctx.fillStyle = this.shade(fill, 0.2);
+    ctx.fillRect(cx - len / 2 - width * 0.7, cy - width / 2, width * 0.7, width);
+  }
+
+  private shade(hex: string, amount: number): string {
+    const n = parseInt(hex.slice(1), 16);
+    const r = (n >> 16) & 255;
+    const g = (n >> 8) & 255;
+    const b = n & 255;
+    const factor = amount >= 0 ? 1 + amount : 1 + amount;
+    const rr = Math.round(Math.max(0, Math.min(255, r * factor)));
+    const gg = Math.round(Math.max(0, Math.min(255, g * factor)));
+    const bb = Math.round(Math.max(0, Math.min(255, b * factor)));
+    return `#${[rr, gg, bb].map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+  }
+
+  private drawBirthdayMark(ctx: CanvasRenderingContext2D, x: number, y: number, r: number) {
+    // 簡易的な誕生日マーク（円）
+    ctx.fillStyle = 'rgba(255, 215, 0, 0.6)';
+    ctx.beginPath();
+    ctx.arc(x, y, r * 1.3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255, 215, 0, 0.9)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+
   private loop() {
-    this.step();
+    // Matter.js エンジンを更新
+    Engine.update(this.engine);
+
+    // 中心バイアスを適用
+    if (this.cfg.inwardForce > 0) {
+      const cx = this.W / 2;
+      for (const body of this.bodies) {
+        const forceX = (cx - body.position.x) * this.cfg.inwardForce;
+        Body.applyForce(body, body.position, { x: forceX, y: 0 });
+      }
+    }
+
+    // 描画
     this.draw();
+
+    // 次フレーム
     this.raf = requestAnimationFrame(() => {
       this.loop();
     });

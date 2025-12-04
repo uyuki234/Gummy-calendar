@@ -9,7 +9,12 @@ type GummyData = {
 interface UseGummyWorldReturn {
   canvasRef: React.RefObject<HTMLCanvasElement>;
   addGummies: (
-    gummies: (GummyData & { isBirthday?: boolean; title?: string; date?: string })[]
+    gummies: (GummyData & {
+      isBirthday?: boolean;
+      title?: string;
+      date?: string;
+      shape?: 'circle' | 'square' | 'pencil' | 'heart' | 'star';
+    })[]
   ) => void;
   clearGummies: () => void;
   shakeGummies: () => void;
@@ -28,22 +33,38 @@ export function useGummyWorld(config?: {
 
   useEffect(() => {
     const updateSize = () => {
-      // 画面サイズに追従（コンテナ幅優先、なければビューポート幅）
-      const vw = Math.max(320, window.innerWidth);
-      const vh = Math.max(360, window.innerHeight);
-      let width = vw;
-      let height = Math.floor(vh * 0.7); // ヘッダーやコントロールを考慮した高さ割合
       if (canvasRef.current) {
         const container = canvasRef.current.parentElement;
         if (container) {
-          width = container.clientWidth; // Tailwindのw-fullに合わせる
+          // 容器の実際の幅を取得（パディング除外）
+          const containerWidth = container.clientWidth;
+          // 容器内の他のコンポーネント（入力欄など）の高さを考慮
+          const availableHeight = Math.max(360, window.innerHeight * 0.6);
+
+          // キャンバスサイズを更新
+          setCanvasSize({ width: containerWidth, height: availableHeight });
+          return;
         }
       }
-      setCanvasSize({ width, height });
+      // フォールバック
+      setCanvasSize({ width: 900, height: 500 });
     };
 
     updateSize();
+
+    // リサイズイベントとリサイズオブザーバーの両方で対応
     window.addEventListener('resize', updateSize);
+
+    // 容器のリサイズもトラッキング
+    if (canvasRef.current?.parentElement) {
+      const resizeObserver = new ResizeObserver(updateSize);
+      resizeObserver.observe(canvasRef.current.parentElement);
+
+      return () => {
+        window.removeEventListener('resize', updateSize);
+        resizeObserver.disconnect();
+      };
+    }
 
     return () => {
       window.removeEventListener('resize', updateSize);
@@ -52,21 +73,23 @@ export function useGummyWorld(config?: {
 
   useEffect(() => {
     if (!canvasRef.current) return;
-    // 初期化は一度だけ
     if (!worldRef.current) {
       worldRef.current = new GummyWorld(canvasRef.current, config);
     }
-    // サイズ変更に追従
     worldRef.current.setSize(canvasSize.width, canvasSize.height);
 
     return () => {
-      // クリーンアップ（必要に応じて）
-      // worldRef.currentは維持（アンマウント時は上位で破棄される想定）
+      // クリーンアップ
     };
   }, [config, canvasSize]);
 
   const addGummies = (
-    gummies: (GummyData & { isBirthday?: boolean; title?: string; date?: string })[]
+    gummies: (GummyData & {
+      isBirthday?: boolean;
+      title?: string;
+      date?: string;
+      shape?: 'circle' | 'square' | 'pencil' | 'heart' | 'star';
+    })[]
   ) => {
     if (worldRef.current) {
       worldRef.current.addGummies(gummies);

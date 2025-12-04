@@ -15,78 +15,71 @@ import {
 import { EventList } from '@/components/EventList';
 import { useGummyWorld } from '@/hooks/useGummyWorld';
 import { useGoogleAuth } from '@/hooks/useGoogleAuth';
-import { useCalendarEvents, CalendarEvent } from '@/hooks/useCalendarEvents';
-import { colorFromEmotionText, diversifyColors } from '@/lib/color';
+import { useCalendarEvents, type CalendarEvent } from '@/hooks/useCalendarEvents';
+import { diversifyColors } from '@/lib/color';
 import { monthKeyFromEvent } from '@/lib/calendar';
 import '@/index.css';
 
-type Gummy = {
-  id: string;
-  date: string;
-  kind: string;
-  title: string;
+function toGummies(events: CalendarEvent[]): Array<{
   color: string;
   weight: number;
-  hsl?: { h: number; s: number; l: number };
   isBirthday?: boolean;
-};
-
-function toGummies(events: CalendarEvent[]): Gummy[] {
+  title?: string;
+  date?: string;
+  shape?: 'circle' | 'square' | 'pencil' | 'heart' | 'star';
+}> {
   return events.map((ev) => {
     const title = ev.summary || '';
-    const text = [title, ev.description || '', ev.location || ''].join(' ');
+    const dateStr =
+      ev.start?.date ||
+      (ev.start?.dateTime ? new Date(ev.start.dateTime).toLocaleDateString('ja-JP') : '');
+
+    // 簡易的な重みの計算
     const isAllDay = !!ev.start?.date && !ev.start?.dateTime;
     const attendees = ev.attendees?.length || 0;
-
-    // 日付を取得
-    let dateStr = '';
-    if (ev.start?.date) {
-      dateStr = ev.start.date;
-    } else if (ev.start?.dateTime) {
-      dateStr = new Date(ev.start.dateTime).toLocaleDateString('ja-JP');
-    }
-
     let durationHours = 0;
+
     if (ev.start?.dateTime && ev.end?.dateTime) {
       durationHours = Math.max(
         0,
         (new Date(ev.end.dateTime).getTime() - new Date(ev.start.dateTime).getTime()) / 3600000
       );
     }
-    const col = colorFromEmotionText(text, {
-      isAllDay,
-      attendees,
-      durationHours,
-    });
-    const lower = text.toLowerCase();
-    const kind = /mtg|会議|meeting/.test(lower)
-      ? 'meeting'
-      : /勉強|講義|study|learn/.test(lower)
-        ? 'study'
-        : /開発|実装|コード|code|task|作業|課題/.test(lower)
-          ? 'work'
-          : /休暇|旅行|家族|買い物|生活|life/.test(lower)
-            ? 'life'
-            : 'other';
+
     const baseWeight = isAllDay ? 0.9 : 1.0;
     let weight = Math.min(
       4,
       baseWeight + Math.log2(attendees + 1) + Math.min(1.5, durationHours / 6)
     );
-    // 誕生日判定（タイトル/説明/場所に "誕生日" または "birthday"）
-    const isBirthday = /誕生日|birthday/i.test(text);
+
+    // 誕生日判定
+    const isBirthday = /誕生日|birthday/i.test(title);
     if (isBirthday) {
       weight = Math.min(4, weight * 1.5);
     }
+
+    // 簡易的な色選択
+    const color = isAllDay ? '#FF6B6B' : '#4ECDC4';
+
+    // 簡易的な形状選択
+    const lower = title.toLowerCase();
+    const shape: 'circle' | 'square' | 'pencil' | 'heart' | 'star' = /会議|meeting/.test(lower)
+      ? 'square'
+      : /勉強|study/.test(lower)
+        ? 'pencil'
+        : /デート|love/.test(lower)
+          ? 'heart'
+          : /旅行|trip/.test(lower)
+            ? 'star'
+            : 'circle';
+
     return {
-      id: ev.id,
-      date: dateStr,
-      kind,
-      title,
-      color: col.hex,
+      color,
       weight,
-      hsl: { h: col.h, s: col.s, l: col.l },
       isBirthday,
+      title,
+      date: dateStr,
+      shape,
     };
   });
 }
@@ -99,30 +92,10 @@ export default function App() {
 
   const { initialize, getAccessToken } = useGoogleAuth();
   const { filteredEvents, fetchEvents, applyFilter } = useCalendarEvents();
-  const {
-    canvasRef,
-    addGummies,
-    clearGummies,
-    shakeGummies,
-    canvasSize,
-  }: {
-    canvasRef: React.RefObject<HTMLCanvasElement>;
-    addGummies: (
-      gummies: {
-        color: string;
-        weight: number;
-        isBirthday?: boolean;
-        title?: string;
-        date?: string;
-      }[]
-    ) => void;
-    clearGummies: () => void;
-    shakeGummies: () => void;
-    canvasSize: { width: number; height: number };
-  } = useGummyWorld({
+  const { canvasRef, addGummies, clearGummies, shakeGummies, canvasSize } = useGummyWorld({
     centerBias: 0.12,
     inwardForce: 0.0,
-    restitution: 0.22,
+    restitution: 0.8,
     maxParticles: 1000,
   });
 
@@ -139,7 +112,7 @@ export default function App() {
       setStatus(`取得完了:${events.length}件 (グミを生成中…)`);
       toast.success(`${events.length}件のイベントを取得しました`);
 
-      // 1秒待ってから年間グミシャワー（3秒/12回）を自動開始
+      // 1秒待ってからグミシャワー
       setTimeout(() => {
         if (events.length > 0) {
           startYearShower(events);
@@ -167,7 +140,7 @@ export default function App() {
       const batch = events.filter((ev) => monthKeyFromEvent(ev) === key);
       if (batch.length) {
         let gummies = toGummies(batch);
-        gummies = diversifyColors(gummies, { threshold: 0.6, jitterDeg: 22 });
+        gummies = diversifyColors(gummies);
         addGummies(gummies);
       }
     }, interval);
@@ -214,6 +187,17 @@ export default function App() {
           <Button variant="outline" onClick={shakeGummies}>
             ゆらす
           </Button>
+          <Button
+            variant="outline"
+            onClick={() => {
+              const text = `${year}年のカレンダーイベント${filteredEvents.length}件をグミにしました！#グミカレンダー #GummyCalendar`;
+              const url = window.location.origin;
+              const xUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`;
+              window.open(xUrl, '_blank');
+            }}
+          >
+            Xに投稿
+          </Button>
           <span className="text-sm text-muted-foreground">{status}</span>
         </div>
       </Card>
@@ -222,7 +206,8 @@ export default function App() {
         ref={canvasRef}
         width={canvasSize.width}
         height={canvasSize.height}
-        className="border border-border rounded-md w-full"
+        className="border border-border rounded-md w-full h-auto block"
+        style={{ maxWidth: '100%', display: 'block' }}
       />
 
       <Card className="p-4">
