@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { GummyWorld } from '@/physics/GummyWorld';
+import { ShapeKind } from '@/lib/shape';
 
 type GummyData = {
   color: string;
@@ -9,7 +10,12 @@ type GummyData = {
 interface UseGummyWorldReturn {
   canvasRef: React.RefObject<HTMLCanvasElement>;
   addGummies: (
-    gummies: (GummyData & { isBirthday?: boolean; title?: string; date?: string })[]
+    gummies: (GummyData & {
+      isBirthday?: boolean;
+      title?: string;
+      date?: string;
+      shape?: ShapeKind;
+    })[]
   ) => void;
   clearGummies: () => void;
   shakeGummies: () => void;
@@ -32,7 +38,7 @@ export function useGummyWorld(config?: {
       const vw = Math.max(320, window.innerWidth);
       const vh = Math.max(360, window.innerHeight);
       let width = vw;
-      let height = Math.floor(vh * 0.7); // ヘッダーやコントロールを考慮した高さ割合
+      const height = Math.floor(vh * 0.7); // ヘッダーやコントロールを考慮した高さ割合
       if (canvasRef.current) {
         const container = canvasRef.current.parentElement;
         if (container) {
@@ -66,7 +72,12 @@ export function useGummyWorld(config?: {
   }, [config, canvasSize]);
 
   const addGummies = (
-    gummies: (GummyData & { isBirthday?: boolean; title?: string; date?: string })[]
+    gummies: (GummyData & {
+      isBirthday?: boolean;
+      title?: string;
+      date?: string;
+      shape?: ShapeKind;
+    })[]
   ) => {
     if (worldRef.current) {
       worldRef.current.addGummies(gummies);

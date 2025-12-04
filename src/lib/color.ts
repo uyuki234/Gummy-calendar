@@ -1,7 +1,7 @@
 import { clamp, wrapHue } from './utils';
 import { scoreEmotion } from './emotion';
 
-function hslToHex(h: number, s: number, l: number) {
+export function hslToHex(h: number, s: number, l: number) {
   s = clamp(s, 0, 1);
   l = clamp(l, 0, 1);
   const c = (1 - Math.abs(2 * l - 1)) * s,

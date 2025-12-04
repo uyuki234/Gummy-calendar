@@ -16,7 +16,8 @@ import { EventList } from '@/components/EventList';
 import { useGummyWorld } from '@/hooks/useGummyWorld';
 import { useGoogleAuth } from '@/hooks/useGoogleAuth';
 import { useCalendarEvents, CalendarEvent } from '@/hooks/useCalendarEvents';
-import { colorFromEmotionText, diversifyColors } from '@/lib/color';
+import { colorFromEmotionText, diversifyColors, hslToHex } from '@/lib/color';
+import { classifyShape, ShapeKind } from '@/lib/shape';
 import { monthKeyFromEvent } from '@/lib/calendar';
 import '@/index.css';
 
@@ -29,7 +30,16 @@ type Gummy = {
   weight: number;
   hsl?: { h: number; s: number; l: number };
   isBirthday?: boolean;
+  shape?: ShapeKind;
 };
+
+function getSeasonBaseHue(month: number): number {
+  // 春: 3-5, 夏: 6-8, 秋: 9-11, 冬: 12,1,2
+  if (month >= 3 && month <= 5) return 330; // 春: ピンク
+  if (month >= 6 && month <= 8) return 120; // 夏: 緑
+  if (month >= 9 && month <= 11) return 30; // 秋: オレンジ
+  return 190; // 冬: 水色
+}
 
 function toGummies(events: CalendarEvent[]): Gummy[] {
   return events.map((ev) => {
@@ -40,10 +50,15 @@ function toGummies(events: CalendarEvent[]): Gummy[] {
 
     // 日付を取得
     let dateStr = '';
+    let month = 1;
     if (ev.start?.date) {
       dateStr = ev.start.date;
+      const m = ev.start.date.split('-')[1];
+      month = m ? Number(m) : 1;
     } else if (ev.start?.dateTime) {
-      dateStr = new Date(ev.start.dateTime).toLocaleDateString('ja-JP');
+      const d = new Date(ev.start.dateTime);
+      dateStr = d.toLocaleDateString('ja-JP');
+      month = d.getMonth() + 1;
     }
 
     let durationHours = 0;
@@ -53,11 +68,21 @@ function toGummies(events: CalendarEvent[]): Gummy[] {
         (new Date(ev.end.dateTime).getTime() - new Date(ev.start.dateTime).getTime()) / 3600000
       );
     }
+    // 季節ベース色を決定
+    const seasonHue = getSeasonBaseHue(month);
+    // 既存ロジックの色を取得
     const col = colorFromEmotionText(text, {
       isAllDay,
       attendees,
       durationHours,
     });
+    // 季節色と既存色を混ぜる（70%既存, 30%季節）
+    const mixedH = (col.h * 0.7 + seasonHue * 0.3) % 360;
+    const mixedColor = {
+      ...col,
+      h: mixedH,
+      hex: hslToHex(mixedH, col.s, col.l),
+    };
     const lower = text.toLowerCase();
     const kind = /mtg|会議|meeting/.test(lower)
       ? 'meeting'
@@ -83,10 +108,11 @@ function toGummies(events: CalendarEvent[]): Gummy[] {
       date: dateStr,
       kind,
       title,
-      color: col.hex,
+      color: mixedColor.hex,
       weight,
-      hsl: { h: col.h, s: col.s, l: col.l },
+      hsl: { h: mixedColor.h, s: mixedColor.s, l: mixedColor.l },
       isBirthday,
+      shape: classifyShape(text),
     };
   });
 }
@@ -114,6 +140,7 @@ export default function App() {
         isBirthday?: boolean;
         title?: string;
         date?: string;
+        shape?: ShapeKind;
       }[]
     ) => void;
     clearGummies: () => void;
@@ -213,6 +240,17 @@ export default function App() {
           </Button>
           <Button variant="outline" onClick={shakeGummies}>
             ゆらす
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => {
+              const text = `${year}年のカレンダーイベント${filteredEvents.length}件をグミにしました！#グミカレンダー #GummyCalendar`;
+              const url = window.location.origin;
+              const xUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`;
+              window.open(xUrl, '_blank');
+            }}
+          >
+            Xに投稿
           </Button>
           <span className="text-sm text-muted-foreground">{status}</span>
         </div>

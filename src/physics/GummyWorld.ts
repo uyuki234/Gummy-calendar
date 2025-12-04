@@ -1,3 +1,5 @@
+import { ShapeKind, drawShape, getShapeBounds } from '@/lib/shape';
+
 type Particle = {
   x: number;
   y: number;
@@ -9,6 +11,9 @@ type Particle = {
   isBirthday?: boolean;
   title?: string;
   date?: string;
+  shape: ShapeKind;
+  angle?: number; // 鉛筆など回転する形状用
+  angularVelocity?: number; // 角速度
 };
 export class GummyWorld {
   private ctx: CanvasRenderingContext2D;
@@ -26,8 +31,8 @@ export class GummyWorld {
   private cfg = {
     gravity: 0.45,
     air: 0.995,
-    restitution: 0.25,
-    frictionTangent: 0.02,
+    restitution: 0.8, // 剛体：反発係数を上げて跳ね返りを強くした
+    frictionTangent: 0.01, // 摩擦を減らして滑りやすく
     centerBias: 0.12,
     inwardForce: 0.0,
     maxParticles: 1000,
@@ -71,6 +76,7 @@ export class GummyWorld {
       isBirthday?: boolean;
       title?: string;
       date?: string;
+      shape?: ShapeKind;
     }[]
   ) {
     const cx = this.W / 2,
@@ -87,17 +93,28 @@ export class GummyWorld {
       // 誕生日の場合は固定サイズ、それ以外は通常の計算
       const baseRadius = Math.max(6, 5 + g.weight * 3);
       const radius = g.isBirthday ? birthdayRadius : baseRadius;
+      // 星は衝突判定を小さめに
+      const effectiveRadius = g.shape === 'star' ? radius * 0.85 : radius;
+
+      // 鉛筆グミには初期回転角度と角速度を設定
+      const isPencil = g.shape === 'pencil';
+      const angle = isPencil ? Math.random() * Math.PI * 2 : 0;
+      const angularVelocity = isPencil ? (Math.random() - 0.5) * 0.1 : 0;
+
       this.particles.push({
         x,
         y: -Math.random() * 200 - 20,
         vx: (Math.random() - 0.5) * 0.25,
         vy: 0,
-        r: radius,
+        r: effectiveRadius,
         m: Math.max(1, g.weight),
         color: g.color,
         isBirthday: g.isBirthday,
         title: g.title,
         date: g.date,
+        shape: g.shape || 'circle',
+        angle,
+        angularVelocity,
       });
     }
     if (this.particles.length > this.cfg.maxParticles)
@@ -216,6 +233,12 @@ export class GummyWorld {
       this.canvas.style.cursor = 'default';
     }
   }
+  private checkCollision(
+    b1: { minX: number; maxX: number; minY: number; maxY: number },
+    b2: { minX: number; maxX: number; minY: number; maxY: number }
+  ): boolean {
+    return !(b1.maxX < b2.minX || b1.minX > b2.maxX || b1.maxY < b2.minY || b1.minY > b2.maxY);
+  }
   private buildGrid() {
     const grid = new Map<string, number[]>(),
       s = this.cfg.cellSize;
@@ -230,9 +253,17 @@ export class GummyWorld {
     }
     return grid;
   }
-  private resolve(i: number, j: number) {
-    const p = this.particles[i],
-      q = this.particles[j];
+  private resolve(idx1: number, idx2: number) {
+    const p = this.particles[idx1],
+      q = this.particles[idx2];
+
+    // AABB判定で衝突をチェック
+    const boundsP = getShapeBounds(p.shape, p.x, p.y, p.r, p.angle ?? 0);
+    const boundsQ = getShapeBounds(q.shape, q.x, q.y, q.r, q.angle ?? 0);
+
+    if (!this.checkCollision(boundsP, boundsQ)) return;
+
+    // 衝突解決
     const dx = q.x - p.x,
       dy = q.y - p.y,
       rSum = p.r + q.r;
@@ -242,34 +273,47 @@ export class GummyWorld {
       nx = dx / d,
       ny = dy / d,
       overlap = rSum - d;
-    const tm = p.m + q.m,
-      pushP = overlap * (q.m / tm),
-      pushQ = overlap * (p.m / tm);
-    p.x -= nx * pushP;
-    p.y -= ny * pushP;
-    q.x += nx * pushQ;
-    q.y += ny * pushQ;
+
+    // 衝突している両方のグミを等しく押し出す（剛体動作）
+    const pushAmount = overlap * 0.5;
+    p.x -= nx * pushAmount;
+    p.y -= ny * pushAmount;
+    q.x += nx * pushAmount;
+    q.y += ny * pushAmount;
+
     const rvx = q.vx - p.vx,
       rvy = q.vy - p.vy,
       relN = rvx * nx + rvy * ny;
-    if (relN < 0) {
-      const e = this.cfg.restitution,
-        j = (-(1 + e) * relN) / (1 / p.m + 1 / q.m),
-        jx = j * nx,
-        jy = j * ny;
-      p.vx -= jx / p.m;
-      p.vy -= jy / p.m;
-      q.vx += jx / q.m;
-      q.vy += jy / q.m;
-      const tx = -ny,
-        ty = nx,
-        relT = rvx * tx + rvy * ty,
-        jt = Math.max(-this.cfg.frictionTangent, Math.min(this.cfg.frictionTangent, relT));
-      p.vx -= (jt * tx) / p.m;
-      p.vy -= (jt * ty) / p.m;
-      q.vx += (jt * tx) / q.m;
-      q.vy += (jt * ty) / q.m;
-    }
+
+    // 分離している場合は何もしない
+    if (relN >= 0) return;
+
+    // 衝突応答：両方のグミが同等に反力を受ける（剛体）
+    const e = this.cfg.restitution;
+    const inverseMass1 = 1 / p.m;
+    const inverseMass2 = 1 / q.m;
+    const totalInverseMass = inverseMass1 + inverseMass2;
+
+    // 衝撃力の計算
+    const impulse = (-(1 + e) * relN) / totalInverseMass;
+    const jx = impulse * nx;
+    const jy = impulse * ny;
+
+    // 速度更新
+    p.vx -= jx * inverseMass1;
+    p.vy -= jy * inverseMass1;
+    q.vx += jx * inverseMass2;
+    q.vy += jy * inverseMass2;
+
+    // 接線方向の摩擦
+    const tx = -ny,
+      ty = nx,
+      relT = rvx * tx + rvy * ty,
+      jt = Math.max(-this.cfg.frictionTangent, Math.min(this.cfg.frictionTangent, relT));
+    p.vx -= jt * tx * inverseMass1;
+    p.vy -= jt * ty * inverseMass1;
+    q.vx += jt * tx * inverseMass2;
+    q.vy += jt * ty * inverseMass2;
   }
   private step() {
     const floorY = this.H - 10,
@@ -286,6 +330,19 @@ export class GummyWorld {
       p.vy *= this.cfg.air;
       p.x += p.vx;
       p.y += p.vy;
+
+      // 鉛筆の角速度を更新（重力トルク）
+      if (p.shape === 'pencil' && p.angle !== undefined && p.angularVelocity !== undefined) {
+        // 鉛筆が垂直（角度0 or π）に向かうようにトルクを加える
+        // sin(angle)を使って復元トルクを計算
+        const torqueMagnitude = 0.02;
+        p.angularVelocity += Math.sin(p.angle) * torqueMagnitude;
+        // 空気抵抗
+        p.angularVelocity *= 0.98;
+        // 角度を更新
+        p.angle += p.angularVelocity;
+      }
+
       if (p.x - p.r < leftX) {
         p.x = leftX + p.r;
         p.vx *= -this.cfg.restitution;
@@ -297,6 +354,11 @@ export class GummyWorld {
         p.y = floorY - p.r;
         p.vy *= -this.cfg.restitution;
         if (Math.abs(p.vy) < 0.25) p.vy = 0;
+
+        // 床に接した時に鉛筆の角速度を増幅（バウンド効果）
+        if (p.shape === 'pencil' && p.angularVelocity !== undefined) {
+          p.angularVelocity *= -0.6;
+        }
       }
     }
     const grid = this.buildGrid(),
@@ -335,14 +397,8 @@ export class GummyWorld {
     ctx.fillStyle = '#eee';
     ctx.fillRect(0, floorY, W, H - floorY);
     for (const p of this.particles) {
-      ctx.fillStyle = p.color;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = 'rgba(255,255,255,0.35)';
-      ctx.beginPath();
-      ctx.arc(p.x - p.r * 0.4, p.y - p.r * 0.45, p.r * 0.28, 0, Math.PI * 2);
-      ctx.fill();
+      // 形に応じた描画（鉛筆は角度を反映）
+      drawShape(ctx, p.shape, p.x, p.y, p.r, p.color, p.angle ?? 0);
       // 誕生日アイコンのオーバーレイ
       if (p.isBirthday && this.birthdayIcon && this.birthdayIcon.complete) {
         const size = p.r * 1.4;
@@ -358,7 +414,6 @@ export class GummyWorld {
       this.drawTooltip(this.draggedParticle);
     }
   }
-
   private drawTooltip(p: Particle) {
     const ctx = this.ctx;
     const padding = 8;
