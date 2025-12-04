@@ -18,6 +18,7 @@ import { useGoogleAuth } from '@/hooks/useGoogleAuth';
 import { useCalendarEvents, type CalendarEvent } from '@/hooks/useCalendarEvents';
 import { diversifyColors } from '@/lib/color';
 import { monthKeyFromEvent } from '@/lib/calendar';
+import { getEventShape, type EventShape } from '@/lib/eventShapes';
 import '@/index.css';
 
 function toGummies(events: CalendarEvent[]): Array<{
@@ -26,7 +27,7 @@ function toGummies(events: CalendarEvent[]): Array<{
   isBirthday?: boolean;
   title?: string;
   date?: string;
-  shape?: 'circle' | 'square' | 'pencil' | 'heart' | 'star';
+  shape?: EventShape;
 }> {
   return events.map((ev) => {
     const title = ev.summary || '';
@@ -61,17 +62,8 @@ function toGummies(events: CalendarEvent[]): Array<{
     // 簡易的な色選択
     const color = isAllDay ? '#FF6B6B' : '#4ECDC4';
 
-    // 簡易的な形状選択
-    const lower = title.toLowerCase();
-    const shape: 'circle' | 'square' | 'pencil' | 'heart' | 'star' = /会議|meeting/.test(lower)
-      ? 'square'
-      : /勉強|study/.test(lower)
-        ? 'pencil'
-        : /デート|love/.test(lower)
-          ? 'heart'
-          : /旅行|trip/.test(lower)
-            ? 'star'
-            : 'circle';
+    // 形状選択（辞書から判定）
+    const shape = getEventShape(title);
 
     return {
       color,
@@ -89,15 +81,17 @@ export default function App() {
   const [status, setStatus] = useState('');
   const [keyword, setKeyword] = useState('');
   const [allDayOnly, setAllDayOnly] = useState(false);
+  const [isGummified, setIsGummified] = useState(false);
 
   const { initialize, getAccessToken } = useGoogleAuth();
   const { filteredEvents, fetchEvents, applyFilter } = useCalendarEvents();
-  const { canvasRef, addGummies, clearGummies, shakeGummies, canvasSize } = useGummyWorld({
-    centerBias: 0.12,
-    inwardForce: 0.0,
-    restitution: 0.8,
-    maxParticles: 1000,
-  });
+  const { canvasRef, addGummies, shakeGummies, addScrollText, getSpeedMultiplier, canvasSize } =
+    useGummyWorld({
+      centerBias: 0.12,
+      inwardForce: 0.0,
+      restitution: 0.8,
+      maxParticles: 1000,
+    });
 
   useEffect(() => {
     initialize();
@@ -106,44 +100,110 @@ export default function App() {
 
   const handleFetch = async () => {
     setStatus(`${year}年のイベント取得中…`);
+    setIsGummified(true); // ボタンを無効化
     try {
       await getAccessToken();
       const events = await fetchEvents(year);
       setStatus(`取得完了:${events.length}件 (グミを生成中…)`);
       toast.success(`${events.length}件のイベントを取得しました`);
 
-      // 1秒待ってからグミシャワー
-      setTimeout(() => {
-        if (events.length > 0) {
-          startYearShower(events);
+      // イベントを古い順にソート
+      const sortedEvents = [...events].sort((a, b) => {
+        const dateA = a.start?.date || a.start?.dateTime || '';
+        const dateB = b.start?.date || b.start?.dateTime || '';
+        return dateA.localeCompare(dateB);
+      });
+
+      // スクロールテキストを追加（月ごとに区切りを表示）
+      const eventsByMonth: Map<string, CalendarEvent[]> = new Map();
+      sortedEvents.forEach((ev) => {
+        const dateA =
+          ev.start?.date ||
+          (ev.start?.dateTime ? new Date(ev.start.dateTime).toISOString().split('T')[0] : '');
+        const month = dateA.substring(0, 7); // YYYY-MM
+        if (!eventsByMonth.has(month)) {
+          eventsByMonth.set(month, []);
         }
-      }, 1000);
+        eventsByMonth.get(month)!.push(ev);
+      });
+
+      // イベントキューを作成（月ヘッダーとイベントのペア、および該当月のグミ生成）
+      const eventQueue: Array<{
+        text: string;
+        date: string;
+        isMonthHeader: boolean;
+        baseDelay: number;
+        monthKey?: string; // 月のキー（グミ生成用）
+      }> = [];
+
+      let totalDelay = 0;
+      const months = Array.from(eventsByMonth.keys()).sort();
+      months.forEach((month) => {
+        // 月の表示（この時点でその月のグミを生成）
+        eventQueue.push({
+          text: `${month.split('-')[1]}月`,
+          date: '',
+          isMonthHeader: true,
+          baseDelay: totalDelay,
+          monthKey: month, // YYYY-MM形式
+        });
+        totalDelay += 1500;
+
+        // その月のイベント
+        const monthEvents = eventsByMonth.get(month) || [];
+        monthEvents.forEach((ev) => {
+          const title = ev.summary || '無題';
+          const dateStr =
+            ev.start?.date ||
+            (ev.start?.dateTime ? new Date(ev.start.dateTime).toLocaleDateString('ja-JP') : '');
+
+          eventQueue.push({
+            text: title,
+            date: dateStr,
+            isMonthHeader: false,
+            baseDelay: totalDelay,
+          });
+          totalDelay += 2000;
+        });
+      });
+
+      // キューから順次イベントを追加（倍速モードを考慮）
+      let queueIndex = 0;
+      const processQueue = () => {
+        if (queueIndex >= eventQueue.length) return;
+
+        const event = eventQueue[queueIndex];
+        const speedMultiplier = getSpeedMultiplier();
+        const delay =
+          queueIndex === 0
+            ? 0
+            : (event.baseDelay - eventQueue[queueIndex - 1].baseDelay) / speedMultiplier;
+
+        setTimeout(() => {
+          addScrollText(event.text, event.date, event.isMonthHeader);
+
+          // 月ヘッダーの場合、その月のグミを生成
+          if (event.isMonthHeader && event.monthKey) {
+            const batch = events.filter((ev) => monthKeyFromEvent(ev) === event.monthKey);
+            if (batch.length) {
+              let gummies = toGummies(batch);
+              gummies = diversifyColors(gummies);
+              addGummies(gummies);
+            }
+          }
+
+          queueIndex++;
+          processQueue();
+        }, delay);
+      };
+
+      processQueue();
     } catch (e) {
       const message = e instanceof Error ? e.message : '取得に失敗しました';
       setStatus(`失敗：${message}`);
       toast.error(`エラー: ${message}`);
+      setIsGummified(false); // エラー時はボタンを再度有効化
     }
-  };
-
-  const startYearShower = (events: CalendarEvent[]) => {
-    const months = Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, '0'));
-    let i = 0;
-    const interval = Math.floor(3000 / 12);
-
-    const timer = setInterval(() => {
-      if (i >= months.length) {
-        clearInterval(timer);
-        setStatus('');
-        return;
-      }
-      const key = `${year}-${months[i++]}`;
-      const batch = events.filter((ev) => monthKeyFromEvent(ev) === key);
-      if (batch.length) {
-        let gummies = toGummies(batch);
-        gummies = diversifyColors(gummies);
-        addGummies(gummies);
-      }
-    }, interval);
   };
 
   const handleFilter = () => {
@@ -178,11 +238,9 @@ export default function App() {
             onClick={() => {
               void handleFetch();
             }}
+            disabled={isGummified}
           >
             グミにする
-          </Button>
-          <Button variant="outline" onClick={clearGummies}>
-            グミを削除
           </Button>
           <Button variant="outline" onClick={shakeGummies}>
             ゆらす

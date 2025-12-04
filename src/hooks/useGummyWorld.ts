@@ -13,11 +13,27 @@ interface UseGummyWorldReturn {
       isBirthday?: boolean;
       title?: string;
       date?: string;
-      shape?: 'circle' | 'square' | 'pencil' | 'heart' | 'star';
+      shape?:
+        | 'circle'
+        | 'square'
+        | 'pencil'
+        | 'heart'
+        | 'bag'
+        | 'calendar'
+        | 'folder'
+        | 'book'
+        | 'briefcase'
+        | 'plane'
+        | 'car'
+        | 'game'
+        | 'bed'
+        | 'hospital';
     })[]
   ) => void;
   clearGummies: () => void;
   shakeGummies: () => void;
+  addScrollText: (text: string, date: string, isMonthHeader?: boolean) => void;
+  getSpeedMultiplier: () => number;
   canvasSize: { width: number; height: number };
 }
 
@@ -88,7 +104,21 @@ export function useGummyWorld(config?: {
       isBirthday?: boolean;
       title?: string;
       date?: string;
-      shape?: 'circle' | 'square' | 'pencil' | 'heart' | 'star';
+      shape?:
+        | 'circle'
+        | 'square'
+        | 'pencil'
+        | 'heart'
+        | 'bag'
+        | 'calendar'
+        | 'folder'
+        | 'book'
+        | 'briefcase'
+        | 'plane'
+        | 'car'
+        | 'game'
+        | 'bed'
+        | 'hospital';
     })[]
   ) => {
     if (worldRef.current) {
@@ -108,11 +138,26 @@ export function useGummyWorld(config?: {
     }
   };
 
+  const addScrollText = (text: string, date: string, isMonthHeader?: boolean) => {
+    if (worldRef.current) {
+      worldRef.current.addScrollText(text, date, isMonthHeader);
+    }
+  };
+
+  const getSpeedMultiplier = () => {
+    if (worldRef.current) {
+      return worldRef.current.getSpeedMultiplier();
+    }
+    return 1;
+  };
+
   return {
     canvasRef,
     addGummies,
     clearGummies,
     shakeGummies,
+    addScrollText,
+    getSpeedMultiplier,
     canvasSize,
   };
 }

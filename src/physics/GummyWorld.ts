@@ -5,7 +5,21 @@ type GummyMetadata = {
   isBirthday?: boolean;
   title?: string;
   date?: string;
-  shape: 'circle' | 'square' | 'pencil' | 'heart' | 'star';
+  shape:
+    | 'circle'
+    | 'square'
+    | 'pencil'
+    | 'heart'
+    | 'bag'
+    | 'calendar'
+    | 'folder'
+    | 'book'
+    | 'briefcase'
+    | 'plane'
+    | 'car'
+    | 'game'
+    | 'bed'
+    | 'hospital';
 };
 
 export class GummyWorld {
@@ -19,6 +33,22 @@ export class GummyWorld {
   private metadataMap: Map<string, GummyMetadata> = new Map();
   private raf = 0;
   private dragConstraint: Constraint | null = null;
+  private draggedBodyId: string | null = null;
+  private birthdayIcon: HTMLImageElement | null = null;
+  private scrollTexts: Array<{
+    text: string;
+    x: number;
+    date: string;
+    lane: number;
+    isMonthHeader?: boolean;
+  }> = [];
+  private scrollSpeed = 2;
+  private readonly maxLanes = 5; // 最大5行まで表示
+  private readonly lineHeight = 30; // 行の高さ
+  private lastUsedLane = -1; // 最後に使用したレーン
+  private speedMultiplier = 1; // コメント倍速（1, 2, 3, 5, 10）
+  private readonly speedOptions = [1, 2, 3, 5, 10]; // 倍速オプション
+  private buttonRect = { x: 0, y: 0, width: 120, height: 40 }; // ボタンの領域
   private cfg = {
     gravity: 0.0015, // Matter.js の標準単位に合わせたスケーリング
     air: 0.001, // frictionAir として使用
@@ -52,6 +82,16 @@ export class GummyWorld {
     this.canvas.addEventListener('mousemove', this.handleMouseMove);
     this.canvas.addEventListener('mouseup', this.handleMouseUp);
     this.canvas.addEventListener('mouseleave', this.handleMouseUp);
+
+    // タッチイベントをセット
+    this.canvas.addEventListener('touchstart', this.handleTouchStart);
+    this.canvas.addEventListener('touchmove', this.handleTouchMove);
+    this.canvas.addEventListener('touchend', this.handleTouchEnd);
+    this.canvas.addEventListener('touchcancel', this.handleTouchEnd);
+
+    // 誕生日アイコンを読み込み
+    this.birthdayIcon = new Image();
+    this.birthdayIcon.src = '/icon-birthday.svg';
 
     // ワールド境界（壁・床）を作成
     this.setupWorldBoundaries();
@@ -192,27 +232,29 @@ export class GummyWorld {
     return body;
   }
 
-  private createStarBody(x: number, y: number, radius: number, bodyOptions: any): any {
-    const vertices = [];
-    const spikes = 5;
-    const outer = radius * 1.8;
-    const inner = radius * 0.8;
-    let rot = (Math.PI / 2) * 3;
+  private createBagBody(x: number, y: number, radius: number, bodyOptions: any): any {
+    // カバンの形状（長方形 + ハンドル）
+    const width = radius * 2.2;
+    const height = radius * 1.6;
 
-    for (let i = 0; i < spikes; i++) {
-      vertices.push({
-        x: Math.cos(rot) * outer,
-        y: Math.sin(rot) * outer,
-      });
-      rot += Math.PI / spikes;
-      vertices.push({
-        x: Math.cos(rot) * inner,
-        y: Math.sin(rot) * inner,
-      });
-      rot += Math.PI / spikes;
-    }
+    const bagVertices = [
+      // 左下
+      { x: -width / 2, y: height / 2 },
+      // 左上
+      { x: -width / 2, y: -height / 2 },
+      // ハンドル左
+      { x: -width * 0.3, y: -height / 2 },
+      { x: -width * 0.25, y: -height * 0.8 },
+      { x: width * 0.25, y: -height * 0.8 },
+      // ハンドル右
+      { x: width * 0.3, y: -height / 2 },
+      // 右上
+      { x: width / 2, y: -height / 2 },
+      // 右下
+      { x: width / 2, y: height / 2 },
+    ];
 
-    return Bodies.fromVertices(x, y, [vertices], bodyOptions);
+    return Bodies.fromVertices(x, y, [bagVertices], bodyOptions);
   }
 
   private createHeartBody(x: number, y: number, radius: number, bodyOptions: any): any {
@@ -225,6 +267,148 @@ export class GummyWorld {
     return Bodies.fromVertices(x, y, [heartVertices], bodyOptions);
   }
 
+  private createCalendarBody(x: number, y: number, radius: number, bodyOptions: any): any {
+    const s = radius * 1.8;
+    return Bodies.rectangle(x, y, s, s, bodyOptions);
+  }
+
+  private createFolderBody(x: number, y: number, radius: number, bodyOptions: any): any {
+    const w = radius * 2.4;
+    const h = radius * 1.8;
+    return Bodies.rectangle(x, y, w, h, bodyOptions);
+  }
+
+  private createBookBody(x: number, y: number, radius: number, bodyOptions: any): any {
+    const w = radius * 2.0;
+    const h = radius * 2.6;
+    return Bodies.rectangle(x, y, w, h, bodyOptions);
+  }
+
+  private createBriefcaseBody(x: number, y: number, radius: number, bodyOptions: any): any {
+    const w = radius * 2.8;
+    const h = radius * 2.0;
+    return Bodies.rectangle(x, y, w, h, bodyOptions);
+  }
+
+  private createPlaneBody(x: number, y: number, radius: number, bodyOptions: any): any {
+    const s = radius * 2.5;
+    const planeVertices = [
+      { x: -s * 0.5, y: 0 },
+      { x: -s * 0.2, y: -s * 0.15 },
+      { x: s * 0.5, y: -s * 0.2 },
+      { x: s * 0.5, y: s * 0.2 },
+      { x: -s * 0.2, y: s * 0.15 },
+    ];
+    return Bodies.fromVertices(x, y, [planeVertices], bodyOptions);
+  }
+
+  private createCarBody(x: number, y: number, radius: number, bodyOptions: any): any {
+    const w = radius * 3.0;
+    const h = radius * 1.8;
+    return Bodies.rectangle(x, y, w, h, bodyOptions);
+  }
+
+  private createGameBody(x: number, y: number, radius: number, bodyOptions: any): any {
+    const w = radius * 2.4;
+    const h = radius * 1.6;
+    return Bodies.rectangle(x, y, w, h, bodyOptions);
+  }
+
+  private createBedBody(x: number, y: number, radius: number, bodyOptions: any): any {
+    const w = radius * 3.2;
+    const h = radius * 2.0;
+    return Bodies.rectangle(x, y, w, h, bodyOptions);
+  }
+
+  private createHospitalBody(x: number, y: number, radius: number, bodyOptions: any): any {
+    const s = radius * 1.8;
+    const crossVertices = [
+      { x: -s * 0.3, y: -s * 0.9 },
+      { x: s * 0.3, y: -s * 0.9 },
+      { x: s * 0.3, y: -s * 0.3 },
+      { x: s * 0.9, y: -s * 0.3 },
+      { x: s * 0.9, y: s * 0.3 },
+      { x: s * 0.3, y: s * 0.3 },
+      { x: s * 0.3, y: s * 0.9 },
+      { x: -s * 0.3, y: s * 0.9 },
+      { x: -s * 0.3, y: s * 0.3 },
+      { x: -s * 0.9, y: s * 0.3 },
+      { x: -s * 0.9, y: -s * 0.3 },
+      { x: -s * 0.3, y: -s * 0.3 },
+    ];
+    return Bodies.fromVertices(x, y, [crossVertices], bodyOptions);
+  }
+
+  addScrollText(text: string, date: string, isMonthHeader: boolean = false) {
+    // 利用可能なレーンを見つける（被らないように）
+    const lane = isMonthHeader ? Math.floor(this.maxLanes / 2) : this.findAvailableLane();
+    console.log(`addScrollText called: ${date} ${text}, lane: ${lane}, isMonth: ${isMonthHeader}`);
+    this.scrollTexts.push({
+      text,
+      date,
+      x: this.W,
+      lane,
+      isMonthHeader,
+    });
+    if (!isMonthHeader) {
+      this.lastUsedLane = lane;
+    }
+  }
+
+  private findAvailableLane(): number {
+    // 前回使ったレーン以外からランダムに選ぶ
+    const availableLanes: number[] = [];
+    for (let i = 0; i < this.maxLanes; i++) {
+      if (i !== this.lastUsedLane) {
+        availableLanes.push(i);
+      }
+    }
+    // ランダムに選択
+    const randomIndex = Math.floor(Math.random() * availableLanes.length);
+    return availableLanes[randomIndex];
+  }
+
+  private drawScrollTexts(ctx: CanvasRenderingContext2D) {
+    if (this.scrollTexts.length > 0) {
+      console.log(`Drawing ${this.scrollTexts.length} scroll texts`);
+    }
+    ctx.save();
+
+    for (const st of this.scrollTexts) {
+      if (st.isMonthHeader) {
+        // 月表示は中央（canvas高さの1/2）に大きなフォントで表示
+        const centerY = this.H / 2 - 30; // 中央位置
+        ctx.font = 'bold 60px sans-serif';
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
+        ctx.strokeStyle = 'rgba(255, 255, 255, 1)';
+        ctx.lineWidth = 4;
+        ctx.textBaseline = 'middle';
+
+        // 縁取り（白、太め）
+        ctx.strokeText(st.text, st.x, centerY);
+        // 本体（黒）
+        ctx.fillText(st.text, st.x, centerY);
+      } else {
+        // 通常のイベント表示（上部の複数行）
+        const y = 10 + st.lane * this.lineHeight;
+        ctx.font = 'bold 18px sans-serif';
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+        ctx.lineWidth = 3;
+        ctx.textBaseline = 'top';
+
+        const displayText = `${st.date} ${st.text}`;
+
+        // 縁取り（白）
+        ctx.strokeText(displayText, st.x, y);
+        // 本体（黒）
+        ctx.fillText(displayText, st.x, y);
+      }
+    }
+
+    ctx.restore();
+  }
+
   addGummies(
     gummies: {
       color: string;
@@ -232,7 +416,21 @@ export class GummyWorld {
       isBirthday?: boolean;
       title?: string;
       date?: string;
-      shape?: 'circle' | 'square' | 'pencil' | 'heart' | 'star';
+      shape?:
+        | 'circle'
+        | 'square'
+        | 'pencil'
+        | 'heart'
+        | 'bag'
+        | 'calendar'
+        | 'folder'
+        | 'book'
+        | 'briefcase'
+        | 'plane'
+        | 'car'
+        | 'game'
+        | 'bed'
+        | 'hospital';
     }[]
   ) {
     const cx = this.W / 2;
@@ -267,10 +465,30 @@ export class GummyWorld {
         body = this.createSquareBody(x, y, radius, bodyOptions);
       } else if (g.shape === 'pencil') {
         body = this.createPencilBody(x, y, radius, bodyOptions);
-      } else if (g.shape === 'star') {
-        body = this.createStarBody(x, y, radius, bodyOptions);
-      } else {
+      } else if (g.shape === 'bag') {
+        body = this.createBagBody(x, y, radius, bodyOptions);
+      } else if (g.shape === 'heart') {
         body = this.createHeartBody(x, y, radius, bodyOptions);
+      } else if (g.shape === 'calendar') {
+        body = this.createCalendarBody(x, y, radius, bodyOptions);
+      } else if (g.shape === 'folder') {
+        body = this.createFolderBody(x, y, radius, bodyOptions);
+      } else if (g.shape === 'book') {
+        body = this.createBookBody(x, y, radius, bodyOptions);
+      } else if (g.shape === 'briefcase') {
+        body = this.createBriefcaseBody(x, y, radius, bodyOptions);
+      } else if (g.shape === 'plane') {
+        body = this.createPlaneBody(x, y, radius, bodyOptions);
+      } else if (g.shape === 'car') {
+        body = this.createCarBody(x, y, radius, bodyOptions);
+      } else if (g.shape === 'game') {
+        body = this.createGameBody(x, y, radius, bodyOptions);
+      } else if (g.shape === 'bed') {
+        body = this.createBedBody(x, y, radius, bodyOptions);
+      } else if (g.shape === 'hospital') {
+        body = this.createHospitalBody(x, y, radius, bodyOptions);
+      } else {
+        body = this.createCircleBody(x, y, radius, bodyOptions);
       }
 
       // 初期速度を設定
@@ -326,6 +544,10 @@ export class GummyWorld {
         y: body.velocity.y + randomVy,
       });
     }
+  }
+
+  getSpeedMultiplier(): number {
+    return this.speedMultiplier;
   }
 
   private getMousePos(e: MouseEvent) {
@@ -386,6 +608,17 @@ export class GummyWorld {
 
   private readonly handleMouseDown = (e: MouseEvent) => {
     const pos = this.getMousePos(e);
+
+    // ボタンクリックチェック
+    if (this.isPointInButton(pos.x, pos.y)) {
+      // 次の倍速に切り替え（1→2→3→5→10→1）
+      const currentIndex = this.speedOptions.indexOf(this.speedMultiplier);
+      const nextIndex = (currentIndex + 1) % this.speedOptions.length;
+      this.speedMultiplier = this.speedOptions[nextIndex];
+      console.log(`Speed: ${this.speedMultiplier}x`);
+      return;
+    }
+
     const body = this.findBodyAt(pos.x, pos.y);
 
     if (body) {
@@ -399,6 +632,7 @@ export class GummyWorld {
       });
 
       World.add(this.world, this.dragConstraint);
+      this.draggedBodyId = body.id.toString();
       this.canvas.style.cursor = 'grabbing';
     }
   };
@@ -420,9 +654,88 @@ export class GummyWorld {
     if (this.dragConstraint) {
       World.remove(this.world, this.dragConstraint);
       this.dragConstraint = null;
+      this.draggedBodyId = null;
       this.canvas.style.cursor = 'default';
     }
   };
+
+  private readonly handleTouchStart = (e: TouchEvent) => {
+    e.preventDefault();
+    if (e.touches.length === 0) return;
+    const touch = e.touches[0];
+    const mouseEvent = new MouseEvent('mousedown', {
+      clientX: touch.clientX,
+      clientY: touch.clientY,
+    });
+    this.handleMouseDown(mouseEvent as any);
+  };
+
+  private readonly handleTouchMove = (e: TouchEvent) => {
+    e.preventDefault();
+    if (e.touches.length === 0) return;
+    const touch = e.touches[0];
+    const mouseEvent = new MouseEvent('mousemove', {
+      clientX: touch.clientX,
+      clientY: touch.clientY,
+    });
+    this.handleMouseMove(mouseEvent as any);
+  };
+
+  private readonly handleTouchEnd = (e: TouchEvent) => {
+    e.preventDefault();
+    this.handleMouseUp();
+  };
+
+  private isPointInButton(x: number, y: number): boolean {
+    // ボタン位置を更新（右上）
+    this.buttonRect.x = this.W - this.buttonRect.width - 10;
+    this.buttonRect.y = 10;
+
+    return (
+      x >= this.buttonRect.x &&
+      x <= this.buttonRect.x + this.buttonRect.width &&
+      y >= this.buttonRect.y &&
+      y <= this.buttonRect.y + this.buttonRect.height
+    );
+  }
+
+  private drawSpeedButton(ctx: CanvasRenderingContext2D) {
+    // ボタン位置を更新（右上）
+    this.buttonRect.x = this.W - this.buttonRect.width - 10;
+    this.buttonRect.y = 10;
+
+    const { x, y, width, height } = this.buttonRect;
+
+    // ボタン背景（倍速が大きいほど赤く）
+    const intensity = Math.min(255, 100 + (this.speedMultiplier - 1) * 30);
+    ctx.fillStyle =
+      this.speedMultiplier > 1 ? `rgba(${intensity}, 100, 100, 0.9)` : 'rgba(100, 100, 100, 0.8)';
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+    ctx.lineWidth = 2;
+
+    // 角丸矩形
+    const radius = 8;
+    ctx.beginPath();
+    ctx.moveTo(x + radius, y);
+    ctx.lineTo(x + width - radius, y);
+    ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+    ctx.lineTo(x + width, y + height - radius);
+    ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+    ctx.lineTo(x + radius, y + height);
+    ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+    ctx.lineTo(x, y + radius);
+    ctx.quadraticCurveTo(x, y, x + radius, y);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // ボタンテキスト
+    ctx.fillStyle = 'white';
+    ctx.font = 'bold 14px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(`${this.speedMultiplier}x`, x + width / 2, y + height / 2);
+  }
 
   private draw() {
     const ctx = this.ctx;
@@ -430,6 +743,9 @@ export class GummyWorld {
     const H = this.H;
 
     ctx.clearRect(0, 0, W, H);
+
+    // スクロールテキストを描画（一番上）
+    this.drawScrollTexts(ctx);
 
     // 各剛体を描画
     for (const body of this.bodies) {
@@ -447,7 +763,15 @@ export class GummyWorld {
       if (metadata.isBirthday) {
         this.drawBirthdayMark(ctx, x, y, body.circleRadius || 10);
       }
+
+      // ドラッグ中のボディに吹き出しを表示
+      if (this.draggedBodyId === body.id.toString()) {
+        this.drawTooltip(ctx, x, y, metadata);
+      }
     }
+
+    // 倍速ボタンを描画（最前面）
+    this.drawSpeedButton(ctx);
   }
 
   private drawGummy(
@@ -477,17 +801,71 @@ export class GummyWorld {
         ctx.translate(-x, -y);
         this.drawPencil(ctx, x, y, r, color);
         break;
-      case 'star':
+      case 'bag':
         ctx.translate(x, y);
         ctx.rotate(angle);
         ctx.translate(-x, -y);
-        this.drawStar(ctx, x, y, r, color);
+        this.drawBag(ctx, x, y, r, color);
         break;
       case 'heart':
         ctx.translate(x, y);
         ctx.rotate(angle);
         ctx.translate(-x, -y);
         this.drawHeart(ctx, x, y, r, color);
+        break;
+      case 'calendar':
+        ctx.translate(x, y);
+        ctx.rotate(angle);
+        ctx.translate(-x, -y);
+        this.drawCalendar(ctx, x, y, r, color);
+        break;
+      case 'folder':
+        ctx.translate(x, y);
+        ctx.rotate(angle);
+        ctx.translate(-x, -y);
+        this.drawFolder(ctx, x, y, r, color);
+        break;
+      case 'book':
+        ctx.translate(x, y);
+        ctx.rotate(angle);
+        ctx.translate(-x, -y);
+        this.drawBook(ctx, x, y, r, color);
+        break;
+      case 'briefcase':
+        ctx.translate(x, y);
+        ctx.rotate(angle);
+        ctx.translate(-x, -y);
+        this.drawBriefcase(ctx, x, y, r, color);
+        break;
+      case 'plane':
+        ctx.translate(x, y);
+        ctx.rotate(angle);
+        ctx.translate(-x, -y);
+        this.drawPlane(ctx, x, y, r, color);
+        break;
+      case 'car':
+        ctx.translate(x, y);
+        ctx.rotate(angle);
+        ctx.translate(-x, -y);
+        this.drawCar(ctx, x, y, r, color);
+        break;
+      case 'game':
+        ctx.translate(x, y);
+        ctx.rotate(angle);
+        ctx.translate(-x, -y);
+        this.drawGame(ctx, x, y, r, color);
+        break;
+      case 'bed':
+        ctx.translate(x, y);
+        ctx.rotate(angle);
+        ctx.translate(-x, -y);
+        this.drawBed(ctx, x, y, r, color);
+        break;
+      case 'hospital':
+        ctx.translate(x, y);
+        ctx.rotate(angle);
+        ctx.translate(-x, -y);
+        this.drawHospital(ctx, x, y, r, color);
         break;
     }
 
@@ -520,8 +898,8 @@ export class GummyWorld {
     fill: string
   ) {
     // r は radius * 1.6 のサイズ（物理ボディのサイズ）
-    // 見た目を大きくするため 1.96倍に (1.4 * 1.4)
-    const visualSize = r * 1.96;
+    // 見た目を大きくするため 2.5872倍に (2.156 * 1.2)
+    const visualSize = r * 2.5872;
     ctx.fillStyle = fill;
     ctx.beginPath();
     ctx.rect(cx - visualSize / 2, cy - visualSize / 2, visualSize, visualSize);
@@ -533,33 +911,26 @@ export class GummyWorld {
     ctx.fill();
   }
 
-  private drawStar(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, fill: string) {
-    const spikes = 5;
-    const outer = r * 1.8;
-    const inner = r * 0.8;
-    let rot = (Math.PI / 2) * 3;
+  private drawBag(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, fill: string) {
+    const width = r * 2.2;
+    const height = r * 1.6;
 
     ctx.fillStyle = fill;
-    ctx.beginPath();
-    ctx.moveTo(cx, cy - outer);
-    for (let i = 0; i < spikes; i++) {
-      const x = cx + Math.cos(rot) * outer;
-      const y = cy + Math.sin(rot) * outer;
-      ctx.lineTo(x, y);
-      rot += Math.PI / spikes;
 
-      const x2 = cx + Math.cos(rot) * inner;
-      const y2 = cy + Math.sin(rot) * inner;
-      ctx.lineTo(x2, y2);
-      rot += Math.PI / spikes;
-    }
-    ctx.closePath();
-    ctx.fill();
+    // カバン本体（長方形）
+    ctx.fillRect(cx - width / 2, cy - height / 2, width, height);
+
+    // ハンドル
+    ctx.strokeStyle = fill;
+    ctx.lineWidth = r * 0.3;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.arc(cx, cy - height / 2, width * 0.3, Math.PI, 0, false);
+    ctx.stroke();
+
     // ハイライト
     ctx.fillStyle = 'rgba(255,255,255,0.35)';
-    ctx.beginPath();
-    ctx.arc(cx - r * 0.4, cy - r * 0.4, r * 0.25, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.fillRect(cx - width * 0.3, cy - height * 0.2, width * 0.4, height * 0.3);
   }
 
   private drawHeart(
@@ -582,6 +953,201 @@ export class GummyWorld {
     ctx.beginPath();
     ctx.arc(cx - r * 0.3, cy - r * 0.3, r * 0.2, 0, Math.PI * 2);
     ctx.fill();
+  }
+
+  private drawCalendar(
+    ctx: CanvasRenderingContext2D,
+    cx: number,
+    cy: number,
+    r: number,
+    fill: string
+  ) {
+    const s = r * 1.8;
+    ctx.fillStyle = fill;
+    ctx.fillRect(cx - s / 2, cy - s / 2, s, s);
+
+    // グリッド線
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+    ctx.lineWidth = 2;
+    for (let i = 1; i < 3; i++) {
+      const offset = (s / 3) * i - s / 2;
+      ctx.beginPath();
+      ctx.moveTo(cx + offset, cy - s / 2);
+      ctx.lineTo(cx + offset, cy + s / 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(cx - s / 2, cy + offset);
+      ctx.lineTo(cx + s / 2, cy + offset);
+      ctx.stroke();
+    }
+  }
+
+  private drawFolder(
+    ctx: CanvasRenderingContext2D,
+    cx: number,
+    cy: number,
+    r: number,
+    fill: string
+  ) {
+    const w = r * 2.4;
+    const h = r * 1.8;
+    ctx.fillStyle = fill;
+    ctx.fillRect(cx - w / 2, cy - h / 2, w, h);
+
+    // タブ
+    ctx.fillRect(cx - w / 2, cy - h / 2 - h * 0.2, w * 0.4, h * 0.2);
+
+    // ハイライト
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.fillRect(cx - w * 0.3, cy - h * 0.2, w * 0.5, h * 0.3);
+  }
+
+  private drawBook(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, fill: string) {
+    const w = r * 2.0;
+    const h = r * 2.6;
+    ctx.fillStyle = fill;
+    ctx.fillRect(cx - w / 2, cy - h / 2, w, h);
+
+    // ページの線
+    ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 4; i++) {
+      const y = cy - h * 0.3 + ((h * 0.6) / 4) * i;
+      ctx.beginPath();
+      ctx.moveTo(cx - w * 0.3, y);
+      ctx.lineTo(cx + w * 0.3, y);
+      ctx.stroke();
+    }
+  }
+
+  private drawBriefcase(
+    ctx: CanvasRenderingContext2D,
+    cx: number,
+    cy: number,
+    r: number,
+    fill: string
+  ) {
+    const w = r * 2.8;
+    const h = r * 2.0;
+    ctx.fillStyle = fill;
+    ctx.fillRect(cx - w / 2, cy - h / 2, w, h);
+
+    // ハンドル
+    ctx.strokeStyle = fill;
+    ctx.lineWidth = r * 0.25;
+    ctx.beginPath();
+    ctx.arc(cx, cy - h / 2, w * 0.15, Math.PI, 0, false);
+    ctx.stroke();
+
+    // ロック
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.fillRect(cx - w * 0.1, cy, w * 0.2, h * 0.15);
+  }
+
+  private drawPlane(
+    ctx: CanvasRenderingContext2D,
+    cx: number,
+    cy: number,
+    r: number,
+    fill: string
+  ) {
+    const s = r * 2.5;
+    ctx.fillStyle = fill;
+
+    // 胴体
+    ctx.fillRect(cx - s * 0.5, cy - s * 0.1, s, s * 0.2);
+
+    // 主翼
+    ctx.fillRect(cx - s * 0.3, cy - s * 0.4, s * 0.6, s * 0.15);
+
+    // 尾翼
+    ctx.fillRect(cx - s * 0.5, cy - s * 0.05, s * 0.2, s * 0.3);
+
+    // ハイライト
+    ctx.fillStyle = 'rgba(255,255,255,0.4)';
+    ctx.fillRect(cx - s * 0.3, cy - s * 0.05, s * 0.4, s * 0.1);
+  }
+
+  private drawCar(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, fill: string) {
+    const w = r * 3.0;
+    const h = r * 1.8;
+
+    // 車体
+    ctx.fillStyle = fill;
+    ctx.fillRect(cx - w / 2, cy - h / 4, w, h / 2);
+
+    // 車窓
+    ctx.fillRect(cx - w * 0.3, cy - h * 0.6, w * 0.25, h * 0.35);
+    ctx.fillRect(cx + w * 0.05, cy - h * 0.6, w * 0.25, h * 0.35);
+
+    // タイヤ
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.beginPath();
+    ctx.arc(cx - w * 0.25, cy + h / 4, r * 0.4, 0, Math.PI * 2);
+    ctx.arc(cx + w * 0.25, cy + h / 4, r * 0.4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  private drawGame(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, fill: string) {
+    const w = r * 2.4;
+    const h = r * 1.6;
+
+    // コントローラー本体
+    ctx.fillStyle = fill;
+    ctx.fillRect(cx - w / 2, cy - h / 2, w, h);
+
+    // 十字キー
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.fillRect(cx - w * 0.35, cy - h * 0.1, w * 0.2, h * 0.05);
+    ctx.fillRect(cx - w * 0.3, cy - h * 0.15, w * 0.1, h * 0.15);
+
+    // ボタン
+    ctx.beginPath();
+    ctx.arc(cx + w * 0.2, cy - h * 0.1, r * 0.15, 0, Math.PI * 2);
+    ctx.arc(cx + w * 0.3, cy, r * 0.15, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  private drawBed(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, fill: string) {
+    const w = r * 3.2;
+    const h = r * 2.0;
+
+    // ベッド本体
+    ctx.fillStyle = fill;
+    ctx.fillRect(cx - w / 2, cy - h / 4, w, h / 2);
+
+    // 枕
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.fillRect(cx - w * 0.4, cy - h * 0.45, w * 0.3, h * 0.2);
+
+    // 毛布
+    ctx.fillStyle = fill;
+    ctx.globalAlpha = 0.7;
+    ctx.fillRect(cx - w * 0.3, cy - h * 0.1, w * 0.7, h * 0.4);
+    ctx.globalAlpha = 1.0;
+  }
+
+  private drawHospital(
+    ctx: CanvasRenderingContext2D,
+    cx: number,
+    cy: number,
+    r: number,
+    fill: string
+  ) {
+    const s = r * 1.8;
+
+    // 十字マーク
+    ctx.fillStyle = fill;
+
+    // 縦棒
+    ctx.fillRect(cx - s * 0.3, cy - s * 0.9, s * 0.6, s * 1.8);
+
+    // 横棒
+    ctx.fillRect(cx - s * 0.9, cy - s * 0.3, s * 1.8, s * 0.6);
+
+    // ハイライト
+    ctx.fillStyle = 'rgba(255,255,255,0.4)';
+    ctx.fillRect(cx - s * 0.15, cy - s * 0.6, s * 0.3, s * 0.5);
   }
 
   private drawPencil(
@@ -625,14 +1191,108 @@ export class GummyWorld {
   }
 
   private drawBirthdayMark(ctx: CanvasRenderingContext2D, x: number, y: number, r: number) {
-    // 簡易的な誕生日マーク（円）
-    ctx.fillStyle = 'rgba(255, 215, 0, 0.6)';
+    if (!this.birthdayIcon || !this.birthdayIcon.complete) return;
+
+    const size = r * 1.2;
+    ctx.save();
+
+    // 白いフィルターを適用するため、一時的なキャンバスを使用
+    ctx.filter = 'brightness(0) invert(1)';
+    ctx.drawImage(this.birthdayIcon, x - size / 2, y - size / 2, size, size);
+
+    ctx.restore();
+  }
+
+  private drawTooltip(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    metadata: GummyMetadata
+  ) {
+    if (!metadata.title && !metadata.date) return;
+
+    ctx.save();
+
+    const padding = 8;
+    const lineHeight = 18;
+    const fontSize = 14;
+    ctx.font = `${fontSize}px sans-serif`;
+
+    // テキストの幅を測定
+    const dateText = metadata.date || '';
+    const titleText = metadata.title || '';
+    const dateWidth = ctx.measureText(dateText).width;
+    const titleWidth = ctx.measureText(titleText).width;
+    const maxWidth = Math.max(dateWidth, titleWidth);
+
+    const tooltipWidth = maxWidth + padding * 2;
+    const tooltipHeight = (dateText && titleText ? lineHeight * 2 : lineHeight) + padding * 2;
+
+    // 吹き出しの位置（オブジェクトの上）
+    const tooltipX = x - tooltipWidth / 2;
+    const tooltipY = y - 60 - tooltipHeight;
+
+    // 背景
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+    ctx.lineWidth = 1;
+
+    // 角丸の矩形
+    const radius = 4;
     ctx.beginPath();
-    ctx.arc(x, y, r * 1.3, 0, Math.PI * 2);
+    ctx.moveTo(tooltipX + radius, tooltipY);
+    ctx.lineTo(tooltipX + tooltipWidth - radius, tooltipY);
+    ctx.quadraticCurveTo(
+      tooltipX + tooltipWidth,
+      tooltipY,
+      tooltipX + tooltipWidth,
+      tooltipY + radius
+    );
+    ctx.lineTo(tooltipX + tooltipWidth, tooltipY + tooltipHeight - radius);
+    ctx.quadraticCurveTo(
+      tooltipX + tooltipWidth,
+      tooltipY + tooltipHeight,
+      tooltipX + tooltipWidth - radius,
+      tooltipY + tooltipHeight
+    );
+    ctx.lineTo(tooltipX + radius, tooltipY + tooltipHeight);
+    ctx.quadraticCurveTo(
+      tooltipX,
+      tooltipY + tooltipHeight,
+      tooltipX,
+      tooltipY + tooltipHeight - radius
+    );
+    ctx.lineTo(tooltipX, tooltipY + radius);
+    ctx.quadraticCurveTo(tooltipX, tooltipY, tooltipX + radius, tooltipY);
+    ctx.closePath();
+
     ctx.fill();
-    ctx.strokeStyle = 'rgba(255, 215, 0, 0.9)';
-    ctx.lineWidth = 2;
     ctx.stroke();
+
+    // 吹き出しの尖った部分（三角形）
+    ctx.beginPath();
+    ctx.moveTo(x, y - 60);
+    ctx.lineTo(x - 6, tooltipY + tooltipHeight);
+    ctx.lineTo(x + 6, tooltipY + tooltipHeight);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // テキスト
+    ctx.fillStyle = 'white';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+
+    let textY = tooltipY + padding;
+    if (dateText) {
+      ctx.fillText(dateText, tooltipX + padding, textY);
+      textY += lineHeight;
+    }
+    if (titleText) {
+      ctx.fillText(titleText, tooltipX + padding, textY);
+    }
+
+    ctx.restore();
   }
 
   private loop() {
@@ -647,6 +1307,13 @@ export class GummyWorld {
         Body.applyForce(body, body.position, { x: forceX, y: 0 });
       }
     }
+
+    // スクロールテキストの更新
+    const currentSpeed = this.scrollSpeed * this.speedMultiplier;
+    this.scrollTexts = this.scrollTexts.filter((st) => {
+      st.x -= currentSpeed;
+      return st.x > -500; // テキストが完全に画面外に出たら削除
+    });
 
     // 描画
     this.draw();
