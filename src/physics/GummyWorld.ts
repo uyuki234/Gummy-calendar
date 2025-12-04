@@ -83,11 +83,11 @@ export class GummyWorld {
     this.canvas.addEventListener('mouseup', this.handleMouseUp);
     this.canvas.addEventListener('mouseleave', this.handleMouseUp);
 
-    // タッチイベントをセット
-    this.canvas.addEventListener('touchstart', this.handleTouchStart);
-    this.canvas.addEventListener('touchmove', this.handleTouchMove);
-    this.canvas.addEventListener('touchend', this.handleTouchEnd);
-    this.canvas.addEventListener('touchcancel', this.handleTouchEnd);
+    // タッチイベントをセット（passive: false で preventDefault を有効化）
+    this.canvas.addEventListener('touchstart', this.handleTouchStart, { passive: false });
+    this.canvas.addEventListener('touchmove', this.handleTouchMove, { passive: false });
+    this.canvas.addEventListener('touchend', this.handleTouchEnd, { passive: false });
+    this.canvas.addEventListener('touchcancel', this.handleTouchEnd, { passive: false });
 
     // 誕生日アイコンを読み込み
     this.birthdayIcon = new Image();
@@ -1305,6 +1305,26 @@ export class GummyWorld {
       for (const body of this.bodies) {
         const forceX = (cx - body.position.x) * this.cfg.inwardForce;
         Body.applyForce(body, body.position, { x: forceX, y: 0 });
+      }
+    }
+
+    // ドラッグ中のグミが画面外に行ったら手放す
+    if (this.dragConstraint && this.draggedBodyId) {
+      const draggedBody = this.bodies.find((b) => b.id.toString() === this.draggedBodyId);
+      if (draggedBody) {
+        const padding = 50; // 画面外と判定する余白
+        if (
+          draggedBody.position.x < -padding ||
+          draggedBody.position.x > this.W + padding ||
+          draggedBody.position.y < -padding ||
+          draggedBody.position.y > this.H + padding
+        ) {
+          // 画面外に行ったので拘束を解除
+          World.remove(this.world, this.dragConstraint);
+          this.dragConstraint = null;
+          this.draggedBodyId = null;
+          this.canvas.style.cursor = 'default';
+        }
       }
     }
 
